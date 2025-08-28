@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="econometrics-data-collectors",
+    name="marketinsights-collector",
     version="0.1.0",
     description="Data collectors for economic and financial indicators",
     author="Econometrics Pipeline",
