@@ -9,6 +9,8 @@ setup(
     install_requires=[
         "requests>=2.31.0",
         "psycopg2-binary>=2.9.0",
+        "beautifulsoup4>=4.12.0",
+        "lxml>=4.9.0",
     ],
     python_requires=">=3.8",
     classifiers=[

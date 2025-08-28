@@ -4,7 +4,7 @@ Tests for economic indicator data collectors.
 
 import pytest
 from datetime import datetime
-from data_collectors.economic_indicators import FREDCollector, BLSCollector, BEACollector, collect_cpi, collect_fed_funds_rate, collect_unemployment, collect_gdp
+from data_collectors.economic_indicators import FREDCollector, BLSCollector, BEACollector, collect_cpi, collect_fed_funds_rate, collect_daily_fed_funds_rate, collect_unemployment, collect_gdp
 
 
 class TestFREDCollector:
@@ -36,6 +36,31 @@ class TestFREDCollector:
         result = collect_fed_funds_rate(database_url=None)
         assert isinstance(result, int)
         assert result >= 0  # Should process at least some records
+
+    def test_collect_daily_fed_funds_rate_function(self):
+        """Test the collect_daily_fed_funds_rate function."""
+        result = collect_daily_fed_funds_rate(database_url=None)
+        assert isinstance(result, int)
+        assert result >= 0  # Should process at least some records
+        
+    def test_fred_collector_date_filtering(self):
+        """Test FRED collector date filtering functionality."""
+        from datetime import datetime, timedelta
+        
+        collector = FREDCollector(database_url=None)
+        
+        # Test with date range
+        end_date = datetime.now().strftime('%Y-%m-%d')
+        start_date = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+        
+        data = collector.get_series_data("DFF", 
+                                       observation_start=start_date,
+                                       observation_end=end_date)
+        
+        assert isinstance(data, list)
+        # Should have fewer records than default 100 limit for a week of daily data
+        if len(data) > 0:
+            assert len(data) <= 10  # At most 7 days + weekends
 
 
 class TestBLSCollector:

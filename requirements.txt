@@ -1,7 +1,7 @@
-requests>=2.31.0
+# Production dependencies for the marketinsights-collector package
+# Install the package itself in editable mode for development
+-e .
+
+# Optional analysis dependencies  
 pandas>=2.0.0
-psycopg2-binary>=2.9.0
-apache-airflow>=2.7.0
-beautifulsoup4>=4.12.0
-lxml>=4.9.0
 python-dotenv>=1.0.0

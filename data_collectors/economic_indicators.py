@@ -53,7 +53,8 @@ class FREDCollector(BaseCollector):
         self.base_url = "https://api.stlouisfed.org/fred/series/observations"
         self.api_key = self.get_env_var("FRED_API_KEY")
         
-    def get_series_data(self, series_id: str, limit: int = 100) -> List[Dict]:
+    def get_series_data(self, series_id: str, limit: int = 100, 
+                       observation_start: str = None, observation_end: str = None) -> List[Dict]:
         """Get FRED time series data."""
         params = {
             "series_id": series_id,
@@ -62,6 +63,11 @@ class FREDCollector(BaseCollector):
             "limit": limit,
             "sort_order": "desc"
         }
+        
+        if observation_start:
+            params["observation_start"] = observation_start
+        if observation_end:
+            params["observation_end"] = observation_end
         
         try:
             data = self.make_request(self.base_url, params)
@@ -191,6 +197,41 @@ def collect_unemployment(database_url=None):
             
     collector.logger.info(f"Successfully processed {success_count} unemployment records")
     return success_count
+
+def collect_daily_fed_funds_rate(database_url=None):
+    """Collect daily Federal Funds Rate data from FRED (DFF series)."""
+    from datetime import datetime, timedelta
+    
+    collector = FREDCollector(database_url)
+    
+    # Get last 30 days of data
+    end_date = datetime.now().strftime('%Y-%m-%d')
+    start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+    
+    series_data = collector.get_series_data("DFF", 
+                                          observation_start=start_date,
+                                          observation_end=end_date)
+    
+    success_count = 0
+    for item in series_data:
+        try:
+            if item["value"] == ".":
+                continue  # Skip missing values
+                
+            data = {
+                "date": datetime.strptime(item["date"], "%Y-%m-%d").date(),
+                "effective_rate": float(item["value"]),
+            }
+            
+            if collector.upsert_data("daily_federal_funds_rate", data):
+                success_count += 1
+                
+        except Exception as e:
+            collector.logger.error(f"Error processing daily Fed Funds data item: {str(e)}")
+            
+    collector.logger.info(f"Successfully processed {success_count} daily Fed Funds records")
+    return success_count
+
 
 def collect_gdp(database_url=None):
     """Collect GDP data."""
