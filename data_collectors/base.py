@@ -3,8 +3,8 @@ import logging
 import requests
 import time
 import psycopg2
-from typing import Dict, Any, Optional
-from datetime import datetime
+from typing import Dict, Any, Optional, Tuple
+from datetime import datetime, date, timedelta
 
 class BaseCollector:
     def __init__(self, database_url=None):
@@ -91,3 +91,78 @@ class BaseCollector:
         if required and not value:
             raise ValueError(f"Required environment variable {var_name} not set")
         return value
+    
+    def get_last_record_date(self, table: str, date_column: str = 'date') -> Optional[date]:
+        """Get the date of the most recent record in the specified table."""
+        if self.database_url is None:
+            return None
+        
+        conn = None
+        try:
+            conn = self.get_db_connection()
+            with conn.cursor() as cur:
+                cur.execute(f"""
+                    SELECT MAX({date_column}) FROM {table}
+                """)
+                result = cur.fetchone()
+                return result[0] if result and result[0] else None
+        except Exception as e:
+            self.logger.warning(f"Could not get last record date from {table}: {str(e)}")
+            return None
+        finally:
+            if conn:
+                conn.close()
+    
+    def table_exists(self, table: str) -> bool:
+        """Check if table exists in the database."""
+        if self.database_url is None:
+            return False
+        
+        conn = None
+        try:
+            conn = self.get_db_connection()
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables 
+                        WHERE table_name = %s
+                    )
+                """, (table,))
+                result = cur.fetchone()
+                return result[0] if result else False
+        except Exception as e:
+            self.logger.warning(f"Could not check if table {table} exists: {str(e)}")
+            return False
+        finally:
+            if conn:
+                conn.close()
+    
+    def get_date_range_for_collection(self, table: str, date_column: str = 'date', 
+                                    default_lookback_days: int = 365) -> Tuple[Optional[date], Optional[date]]:
+        """
+        Determine the date range to collect data for based on existing records.
+        Returns (start_date, end_date) tuple.
+        
+        For empty tables: returns (start_date for historical data, today)
+        For existing tables: returns (last_record_date + 1 day, today)
+        """
+        end_date = datetime.now().date()
+        
+        # Check if we have existing data
+        last_date = self.get_last_record_date(table, date_column)
+        
+        if last_date is None:
+            # No existing data - fetch historical data
+            start_date = end_date - timedelta(days=default_lookback_days)
+            self.logger.info(f"No existing data in {table}, fetching {default_lookback_days} days of historical data")
+        else:
+            # Existing data - fetch only new data since last record
+            start_date = last_date + timedelta(days=1)
+            if start_date > end_date:
+                # No new data needed
+                self.logger.info(f"Data in {table} is up to date (last: {last_date})")
+                return None, None
+            else:
+                self.logger.info(f"Fetching incremental data for {table} from {start_date} to {end_date}")
+        
+        return start_date, end_date
