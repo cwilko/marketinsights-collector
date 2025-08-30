@@ -38,7 +38,7 @@ def collect_sp500(database_url=None):
         observation_end=end_date.strftime("%Y-%m-%d")
     )
     
-    success_count = 0
+    bulk_data = []
     for item in series_data:
         try:
             if item["value"] == ".":
@@ -51,15 +51,19 @@ def collect_sp500(database_url=None):
                 "high_price": float(item["value"]),
                 "low_price": float(item["value"]),
             }
-            
-            if collector.upsert_data("sp500_index", data):
-                success_count += 1
+            bulk_data.append(data)
                 
         except Exception as e:
             collector.logger.error(f"Error processing S&P 500 data item: {str(e)}")
-            
-    collector.logger.info(f"Successfully processed {success_count} S&P 500 records")
-    return success_count
+    
+    # Bulk upsert all records
+    if bulk_data:
+        success_count = collector.bulk_upsert_data("sp500_index", bulk_data)
+        collector.logger.info(f"Successfully bulk upserted {success_count} S&P 500 records")
+        return success_count
+    else:
+        collector.logger.info("No valid S&P 500 data to process")
+        return 0
 
 def collect_vix(database_url=None):
     """Collect VIX data from FRED with incremental updates."""
@@ -81,7 +85,7 @@ def collect_vix(database_url=None):
         observation_end=end_date.strftime("%Y-%m-%d")
     )
     
-    success_count = 0
+    bulk_data = []
     for item in series_data:
         try:
             if item["value"] == ".":
@@ -94,15 +98,19 @@ def collect_vix(database_url=None):
                 "high_price": float(item["value"]),
                 "low_price": float(item["value"]),
             }
-            
-            if collector.upsert_data("vix_index", data):
-                success_count += 1
+            bulk_data.append(data)
                 
         except Exception as e:
             collector.logger.error(f"Error processing VIX data item: {str(e)}")
-            
-    collector.logger.info(f"Successfully processed {success_count} VIX records")
-    return success_count
+    
+    # Bulk upsert all records
+    if bulk_data:
+        success_count = collector.bulk_upsert_data("vix_index", bulk_data)
+        collector.logger.info(f"Successfully bulk upserted {success_count} VIX records")
+        return success_count
+    else:
+        collector.logger.info("No valid VIX data to process")
+        return 0
 
 class TreasuryCollector(BaseCollector):
     def __init__(self, database_url=None):
@@ -169,7 +177,7 @@ def collect_treasury_yields(database_url=None):
         "30_yr": "30Y"
     }
     
-    success_count = 0
+    bulk_data = []
     for record in yield_data:
         try:
             record_date = datetime.strptime(record["record_date"], "%Y-%m-%d").date()
@@ -181,15 +189,19 @@ def collect_treasury_yields(database_url=None):
                         "maturity": maturity,
                         "yield_rate": float(record[api_field])
                     }
-                    
-                    if collector.upsert_data("treasury_yields", data, conflict_columns=["date", "maturity"]):
-                        success_count += 1
+                    bulk_data.append(data)
                         
         except Exception as e:
             collector.logger.error(f"Error processing Treasury yield data: {str(e)}")
-            
-    collector.logger.info(f"Successfully processed {success_count} Treasury yield records")
-    return success_count
+    
+    # Bulk upsert all records
+    if bulk_data:
+        success_count = collector.bulk_upsert_data("treasury_yields", bulk_data, conflict_columns=["date", "maturity"])
+        collector.logger.info(f"Successfully bulk upserted {success_count} Treasury yield records")
+        return success_count
+    else:
+        collector.logger.info("No valid Treasury yield data to process")
+        return 0
 
 
 def collect_fred_treasury_yields(database_url=None):
@@ -223,7 +235,8 @@ def collect_fred_treasury_yields(database_url=None):
                 observation_end=end_date.strftime("%Y-%m-%d")
             )
             
-            series_success_count = 0
+            # Prepare bulk data for this series
+            bulk_data = []
             for item in series_data:
                 try:
                     if item["value"] == ".":
@@ -235,16 +248,22 @@ def collect_fred_treasury_yields(database_url=None):
                         "maturity": maturity,
                         "yield_rate": float(item["value"]),
                     }
-                    
-                    # Use series_id and date as conflict columns for FRED data
-                    if collector.upsert_data("fred_treasury_yields", data, conflict_columns=["date", "series_id"]):
-                        series_success_count += 1
+                    bulk_data.append(data)
                         
                 except Exception as e:
                     collector.logger.error(f"Error processing {series_id} data item: {str(e)}")
                     
-            collector.logger.info(f"Successfully processed {series_success_count} records for {maturity} yields")
-            total_success_count += series_success_count
+            # Bulk upsert all records for this series
+            if bulk_data:
+                series_success_count = collector.bulk_upsert_data(
+                    "fred_treasury_yields", 
+                    bulk_data, 
+                    conflict_columns=["date", "series_id"]
+                )
+                collector.logger.info(f"Successfully bulk upserted {series_success_count} records for {maturity} yields")
+                total_success_count += series_success_count
+            else:
+                collector.logger.info(f"No valid data to process for {maturity} yields")
             
         except Exception as e:
             collector.logger.error(f"Failed to collect {series_id} ({maturity}) data: {str(e)}")
@@ -313,10 +332,12 @@ def collect_pe_ratios(database_url=None):
                 
             if shiller_pe:
                 data["sp500_shiller_pe"] = shiller_pe
-                
-            if collector.upsert_data("pe_ratios", data):
+            
+            # Use bulk upsert for consistency (single record)
+            success_count = collector.bulk_upsert_data("pe_ratios", [data])
+            if success_count > 0:
                 collector.logger.info(f"Successfully collected P/E ratios: SP500={sp500_pe}, Shiller={shiller_pe}")
-                return 1
+                return success_count
                 
     except Exception as e:
         collector.logger.error(f"Error collecting P/E ratios: {str(e)}")

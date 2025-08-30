@@ -155,7 +155,7 @@ def collect_cpi(database_url=None):
     
     series_data = collector.get_series_data("CUUR0000SA0", start_year, end_year)  # All items CPI-U
     
-    success_count = 0
+    bulk_data = []
     for item in series_data:
         try:
             # Parse BLS date format (YYYY + MM)
@@ -182,18 +182,23 @@ def collect_cpi(database_url=None):
             if prev_year_data:
                 prev_value = float(prev_year_data[0]["value"])
                 data["year_over_year_change"] = ((float(item["value"]) - prev_value) / prev_value) * 100
-                
-            if collector.upsert_data("consumer_price_index", data):
-                success_count += 1
+            
+            bulk_data.append(data)
                 
         except Exception as e:
             collector.logger.error(f"Error processing CPI data item: {str(e)}")
-            
-    collector.logger.info(f"Successfully processed {success_count} CPI records")
-    return success_count
+    
+    # Bulk upsert all records
+    if bulk_data:
+        success_count = collector.bulk_upsert_data("consumer_price_index", bulk_data)
+        collector.logger.info(f"Successfully bulk upserted {success_count} CPI records")
+        return success_count
+    else:
+        collector.logger.info("No valid CPI data to process")
+        return 0
 
-def collect_fed_funds_rate(database_url=None):
-    """Collect Federal Funds Rate data with incremental updates."""
+def collect_monthly_fed_funds_rate(database_url=None):
+    """Collect monthly Federal Funds Rate data with incremental updates."""
     collector = FREDCollector(database_url)
     
     # Get date range for collection (incremental or historical)
@@ -213,7 +218,7 @@ def collect_fed_funds_rate(database_url=None):
         observation_end=end_date.strftime("%Y-%m-%d")
     )
     
-    success_count = 0
+    bulk_data = []
     for item in series_data:
         try:
             if item["value"] == ".":
@@ -223,17 +228,21 @@ def collect_fed_funds_rate(database_url=None):
                 "date": datetime.strptime(item["date"], "%Y-%m-%d").date(),
                 "effective_rate": float(item["value"]),
             }
-            
-            if collector.upsert_data("federal_funds_rate", data):
-                success_count += 1
+            bulk_data.append(data)
                 
         except Exception as e:
             collector.logger.error(f"Error processing Fed Funds data item: {str(e)}")
-            
-    collector.logger.info(f"Successfully processed {success_count} Fed Funds records")
-    return success_count
+    
+    # Bulk upsert all records
+    if bulk_data:
+        success_count = collector.bulk_upsert_data("federal_funds_rate", bulk_data)
+        collector.logger.info(f"Successfully bulk upserted {success_count} Fed Funds records")
+        return success_count
+    else:
+        collector.logger.info("No valid Fed Funds data to process")
+        return 0
 
-def collect_unemployment(database_url=None):
+def collect_unemployment_rate(database_url=None):
     """Collect Unemployment Rate data with incremental updates."""
     collector = BLSCollector(database_url)
     
@@ -253,7 +262,7 @@ def collect_unemployment(database_url=None):
     
     series_data = collector.get_series_data("LNS14000000", start_year, end_year)  # Unemployment Rate
     
-    success_count = 0
+    bulk_data = []
     for item in series_data:
         try:
             year = int(item["year"])
@@ -272,15 +281,19 @@ def collect_unemployment(database_url=None):
                 "date": date,
                 "rate": float(item["value"]),
             }
-            
-            if collector.upsert_data("unemployment_rate", data):
-                success_count += 1
+            bulk_data.append(data)
                 
         except Exception as e:
             collector.logger.error(f"Error processing unemployment data item: {str(e)}")
-            
-    collector.logger.info(f"Successfully processed {success_count} unemployment records")
-    return success_count
+    
+    # Bulk upsert all records
+    if bulk_data:
+        success_count = collector.bulk_upsert_data("unemployment_rate", bulk_data)
+        collector.logger.info(f"Successfully bulk upserted {success_count} unemployment records")
+        return success_count
+    else:
+        collector.logger.info("No valid unemployment data to process")
+        return 0
 
 def collect_daily_fed_funds_rate(database_url=None):
     """Collect daily Federal Funds Rate data from FRED (DFF series) with incremental updates."""
@@ -302,7 +315,7 @@ def collect_daily_fed_funds_rate(database_url=None):
         observation_end=end_date.strftime('%Y-%m-%d')
     )
     
-    success_count = 0
+    bulk_data = []
     for item in series_data:
         try:
             if item["value"] == ".":
@@ -312,15 +325,19 @@ def collect_daily_fed_funds_rate(database_url=None):
                 "date": datetime.strptime(item["date"], "%Y-%m-%d").date(),
                 "effective_rate": float(item["value"]),
             }
-            
-            if collector.upsert_data("daily_federal_funds_rate", data):
-                success_count += 1
+            bulk_data.append(data)
                 
         except Exception as e:
             collector.logger.error(f"Error processing daily Fed Funds data item: {str(e)}")
-            
-    collector.logger.info(f"Successfully processed {success_count} daily Fed Funds records")
-    return success_count
+    
+    # Bulk upsert all records
+    if bulk_data:
+        success_count = collector.bulk_upsert_data("daily_federal_funds_rate", bulk_data)
+        collector.logger.info(f"Successfully bulk upserted {success_count} daily Fed Funds records")
+        return success_count
+    else:
+        collector.logger.info("No valid daily Fed Funds data to process")
+        return 0
 
 
 def collect_gdp(database_url=None):
@@ -328,7 +345,7 @@ def collect_gdp(database_url=None):
     collector = BEACollector(database_url)
     gdp_data = collector.get_gdp_data()
     
-    success_count = 0
+    bulk_data = []
     for item in gdp_data:
         try:
             if item.get("LineDescription") != "Gross domestic product":
@@ -344,12 +361,16 @@ def collect_gdp(database_url=None):
                 "quarter": quarter_date,
                 "gdp_billions": float(item["DataValue"]),
             }
-            
-            if collector.upsert_data("gross_domestic_product", data, conflict_columns=["quarter"]):
-                success_count += 1
+            bulk_data.append(data)
                 
         except Exception as e:
             collector.logger.error(f"Error processing GDP data item: {str(e)}")
-            
-    collector.logger.info(f"Successfully processed {success_count} GDP records")
-    return success_count
+    
+    # Bulk upsert all records
+    if bulk_data:
+        success_count = collector.bulk_upsert_data("gross_domestic_product", bulk_data, conflict_columns=["quarter"])
+        collector.logger.info(f"Successfully bulk upserted {success_count} GDP records")
+        return success_count
+    else:
+        collector.logger.info("No valid GDP data to process")
+        return 0

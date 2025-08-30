@@ -3,7 +3,7 @@ import logging
 import requests
 import time
 import psycopg2
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, List
 from datetime import datetime, date, timedelta
 
 class BaseCollector:
@@ -83,6 +83,91 @@ class BaseCollector:
             return False
         finally:
             if conn:  # Always close connection if we created one
+                conn.close()
+
+    def bulk_upsert_data(self, table: str, data_list: List[Dict[str, Any]], 
+                        conflict_columns: list = None, batch_size: int = 1000) -> int:
+        """Bulk insert or update data in PostgreSQL table if database_url provided.
+        
+        Args:
+            table: Table name
+            data_list: List of dictionaries with data to upsert
+            conflict_columns: Columns to use for conflict resolution (defaults to ['date'])
+            batch_size: Number of records to process in each batch
+            
+        Returns:
+            Number of successfully processed records
+        """
+        if self.database_url is None:
+            self.logger.info(f"No database URL provided - skipping storage of {len(data_list)} records to {table}")
+            return len(data_list)  # Return count but skip storage
+        
+        if not data_list:
+            self.logger.info(f"No data provided for bulk upsert to {table}")
+            return 0
+            
+        conn = None
+        total_processed = 0
+        
+        try:
+            conn = self.get_db_connection()
+            
+            if conflict_columns is None:
+                conflict_columns = ['date']
+                
+            # Get column structure from first record
+            first_record = data_list[0]
+            columns = list(first_record.keys())
+            columns_str = ', '.join(columns)
+            
+            # Create UPDATE clause for ON CONFLICT
+            update_clause = ', '.join([f"{col} = EXCLUDED.{col}" for col in columns if col not in conflict_columns])
+            conflict_str = ', '.join(conflict_columns)
+            
+            # Create placeholders for VALUES clause
+            placeholders = ', '.join(['%s'] * len(columns))
+            
+            # Process data in batches
+            for i in range(0, len(data_list), batch_size):
+                batch = data_list[i:i + batch_size]
+                
+                # Prepare values for batch
+                values_list = []
+                for record in batch:
+                    values_list.append(tuple(record[col] for col in columns))
+                
+                # Create VALUES clause for multiple records
+                values_placeholders = ', '.join([f"({placeholders})" for _ in range(len(batch))])
+                
+                sql = f"""
+                INSERT INTO {table} ({columns_str}, updated_at)
+                VALUES {values_placeholders.replace(placeholders, placeholders + ', CURRENT_TIMESTAMP')}
+                ON CONFLICT ({conflict_str}) DO UPDATE SET
+                {update_clause}, updated_at = CURRENT_TIMESTAMP
+                """
+                
+                # Flatten values for execute
+                flat_values = []
+                for record in batch:
+                    flat_values.extend(record[col] for col in columns)
+                
+                with conn.cursor() as cur:
+                    cur.execute(sql, flat_values)
+                    conn.commit()
+                    
+                total_processed += len(batch)
+                self.logger.debug(f"Processed batch of {len(batch)} records for {table}")
+                
+            self.logger.info(f"Successfully bulk upserted {total_processed} records to {table}")
+            return total_processed
+            
+        except Exception as e:
+            self.logger.error(f"Failed to bulk upsert data to {table}: {str(e)}")
+            if conn:
+                conn.rollback()
+            return total_processed  # Return what we managed to process
+        finally:
+            if conn:
                 conn.close()
             
     def get_env_var(self, var_name: str, required: bool = True) -> Optional[str]:
