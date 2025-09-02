@@ -28,15 +28,23 @@ def collect_sp500(database_url=None):
         default_lookback_days=10*365  # 10 years of historical data
     )
     
-    if start_date is None:
+    if start_date is None and end_date is None:
         collector.logger.info("S&P 500 data is already up to date")
         return 0
     
-    series_data = collector.get_series_data(
-        "SP500",
-        observation_start=start_date.strftime("%Y-%m-%d"),
-        observation_end=end_date.strftime("%Y-%m-%d")
-    )
+    # Handle unlimited historical data fetch
+    if start_date is None:
+        # Fetch all available historical data - don't specify observation_start
+        series_data = collector.get_series_data(
+            "SP500",
+            observation_end=end_date.strftime("%Y-%m-%d")
+        )
+    else:
+        series_data = collector.get_series_data(
+            "SP500",
+            observation_start=start_date.strftime("%Y-%m-%d"),
+            observation_end=end_date.strftime("%Y-%m-%d")
+        )
     
     bulk_data = []
     for item in series_data:
@@ -75,15 +83,23 @@ def collect_vix(database_url=None):
         default_lookback_days=10*365  # 10 years of historical data
     )
     
-    if start_date is None:
+    if start_date is None and end_date is None:
         collector.logger.info("VIX data is already up to date")
         return 0
     
-    series_data = collector.get_series_data(
-        "VIXCLS",
-        observation_start=start_date.strftime("%Y-%m-%d"),
-        observation_end=end_date.strftime("%Y-%m-%d")
-    )
+    # Handle unlimited historical data fetch
+    if start_date is None:
+        # Fetch all available historical data - don't specify observation_start
+        series_data = collector.get_series_data(
+            "VIXCLS",
+            observation_end=end_date.strftime("%Y-%m-%d")
+        )
+    else:
+        series_data = collector.get_series_data(
+            "VIXCLS",
+            observation_start=start_date.strftime("%Y-%m-%d"),
+            observation_end=end_date.strftime("%Y-%m-%d")
+        )
     
     bulk_data = []
     for item in series_data:
@@ -112,96 +128,6 @@ def collect_vix(database_url=None):
         collector.logger.info("No valid VIX data to process")
         return 0
 
-class TreasuryCollector(BaseCollector):
-    def __init__(self, database_url=None):
-        super().__init__(database_url)
-        self.base_url = "https://api.fiscaldata.treasury.gov/services/api/v1/accounting/od/daily_treasury_yield_curve"
-        
-    def get_yield_data(self, limit: int = 10000, date_range: str = None) -> List[Dict]:
-        """
-        Get Treasury yield curve data with bulk fetching support.
-        date_range: Filter format like 'record_date:gte:2020-01-01,record_date:lte:2023-12-31'
-        """
-        params = {
-            "format": "json",
-            "sort": "record_date",  # Ascending for chronological processing
-            "page[size]": limit
-        }
-        
-        if date_range:
-            params["filter"] = date_range
-        
-        try:
-            data = self.make_request(self.base_url, params)
-            if data and "data" in data:
-                records = data["data"]
-                self.logger.info(f"Retrieved {len(records)} Treasury yield records")
-                return records
-            return []
-        except Exception as e:
-            self.logger.error(f"Failed to fetch Treasury yield data: {str(e)}")
-            return []
-
-def collect_treasury_yields(database_url=None):
-    """Collect Treasury yield curve data with incremental updates."""
-    collector = TreasuryCollector(database_url)
-    
-    # Get date range for collection
-    start_date, end_date = collector.get_date_range_for_collection(
-        table="treasury_yields",
-        default_lookback_days=5*365  # 5 years of historical data
-    )
-    
-    if start_date is None:
-        collector.logger.info("Treasury yields data is already up to date")
-        return 0
-    
-    # Build Treasury API date filter
-    date_filter = f"record_date:gte:{start_date.strftime('%Y-%m-%d')},record_date:lte:{end_date.strftime('%Y-%m-%d')}"
-    yield_data = collector.get_yield_data(date_range=date_filter)
-    
-    # Mapping of Treasury API fields to our maturity names
-    maturity_mapping = {
-        "1_mo": "1M",
-        "2_mo": "2M", 
-        "3_mo": "3M",
-        "4_mo": "4M",
-        "6_mo": "6M",
-        "1_yr": "1Y",
-        "2_yr": "2Y",
-        "3_yr": "3Y",
-        "5_yr": "5Y",
-        "7_yr": "7Y",
-        "10_yr": "10Y",
-        "20_yr": "20Y",
-        "30_yr": "30Y"
-    }
-    
-    bulk_data = []
-    for record in yield_data:
-        try:
-            record_date = datetime.strptime(record["record_date"], "%Y-%m-%d").date()
-            
-            for api_field, maturity in maturity_mapping.items():
-                if record.get(api_field) and record[api_field] != "":
-                    data = {
-                        "date": record_date,
-                        "maturity": maturity,
-                        "yield_rate": float(record[api_field])
-                    }
-                    bulk_data.append(data)
-                        
-        except Exception as e:
-            collector.logger.error(f"Error processing Treasury yield data: {str(e)}")
-    
-    # Bulk upsert all records
-    if bulk_data:
-        success_count = collector.bulk_upsert_data("treasury_yields", bulk_data, conflict_columns=["date", "maturity"])
-        collector.logger.info(f"Successfully bulk upserted {success_count} Treasury yield records")
-        return success_count
-    else:
-        collector.logger.info("No valid Treasury yield data to process")
-        return 0
 
 
 def collect_fred_treasury_yields(database_url=None):
@@ -217,7 +143,7 @@ def collect_fred_treasury_yields(database_url=None):
         default_lookback_days=5*365  # 5 years of historical data
     )
     
-    if start_date is None:
+    if start_date is None and end_date is None:
         collector.logger.info("FRED Treasury yields data is already up to date")
         return 0
     
@@ -229,11 +155,18 @@ def collect_fred_treasury_yields(database_url=None):
         
         try:
             # Fetch data with date range for this specific series
-            series_data = collector.get_series_data(
-                series_id,
-                observation_start=start_date.strftime("%Y-%m-%d"),
-                observation_end=end_date.strftime("%Y-%m-%d")
-            )
+            if start_date is None:
+                # Fetch all available historical data - don't specify observation_start
+                series_data = collector.get_series_data(
+                    series_id,
+                    observation_end=end_date.strftime("%Y-%m-%d")
+                )
+            else:
+                series_data = collector.get_series_data(
+                    series_id,
+                    observation_start=start_date.strftime("%Y-%m-%d"),
+                    observation_end=end_date.strftime("%Y-%m-%d")
+                )
             
             # Prepare bulk data for this series
             bulk_data = []

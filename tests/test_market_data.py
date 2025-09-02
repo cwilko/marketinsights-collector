@@ -4,7 +4,7 @@ Tests for market data collectors.
 
 import pytest
 from datetime import datetime
-from data_collectors.market_data import collect_sp500, collect_vix, collect_treasury_yields, collect_pe_ratios
+from data_collectors.market_data import collect_sp500, collect_vix, collect_pe_ratios
 from data_collectors.economic_indicators import FREDCollector
 
 

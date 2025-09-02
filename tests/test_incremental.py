@@ -7,7 +7,7 @@ import pytest
 import os
 from datetime import datetime, date, timedelta
 from unittest.mock import patch
-from data_collectors.economic_indicators import collect_fed_funds_rate, collect_cpi, FREDCollector, BEACollector
+from data_collectors.economic_indicators import collect_monthly_fed_funds_rate, collect_cpi, FREDCollector, BEACollector
 from data_collectors.market_data import collect_sp500, collect_fred_treasury_yields
 
 
@@ -37,7 +37,7 @@ class TestIncrementalCollection:
     def test_incremental_fed_funds_safe_mode(self):
         """Test Federal Funds Rate collector in safe mode (no database)."""
         # Safe mode - no database operations
-        result = collect_fed_funds_rate(database_url=None)
+        result = collect_monthly_fed_funds_rate(database_url=None)
         
         # Should return a count of processed records
         assert isinstance(result, int)

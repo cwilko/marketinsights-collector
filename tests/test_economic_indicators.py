@@ -4,7 +4,7 @@ Tests for economic indicator data collectors.
 
 import pytest
 from datetime import datetime
-from data_collectors.economic_indicators import FREDCollector, BLSCollector, BEACollector, collect_cpi, collect_fed_funds_rate, collect_daily_fed_funds_rate, collect_unemployment, collect_gdp
+from data_collectors.economic_indicators import FREDCollector, BLSCollector, BEACollector, collect_cpi, collect_monthly_fed_funds_rate, collect_daily_fed_funds_rate, collect_unemployment_rate, collect_gdp
 from data_collectors.market_data import collect_fred_treasury_yields, FRED_TREASURY_SERIES
 
 
@@ -33,8 +33,8 @@ class TestFREDCollector:
             # Some values might be ".", that's ok
             
     def test_collect_fed_funds_rate_function(self):
-        """Test the collect_fed_funds_rate function."""
-        result = collect_fed_funds_rate(database_url=None)
+        """Test the collect_monthly_fed_funds_rate function."""
+        result = collect_monthly_fed_funds_rate(database_url=None)
         assert isinstance(result, int)
         assert result >= 0  # Should process at least some records
 
@@ -96,8 +96,8 @@ class TestBLSCollector:
         assert result >= 0  # Should process at least some records
         
     def test_collect_unemployment_function(self):
-        """Test the collect_unemployment function."""
-        result = collect_unemployment(database_url=None)
+        """Test the collect_unemployment_rate function."""
+        result = collect_unemployment_rate(database_url=None)
         assert isinstance(result, int)
         assert result >= 0  # Should process at least some records
 

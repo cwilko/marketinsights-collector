@@ -11,7 +11,7 @@ import os
 import logging
 from datetime import datetime, date
 from decimal import Decimal
-from data_collectors.economic_indicators import FREDCollector, collect_fed_funds_rate
+from data_collectors.economic_indicators import FREDCollector, collect_monthly_fed_funds_rate
 from data_collectors.market_data import collect_sp500
 
 # Set up logging
@@ -296,9 +296,9 @@ def test_collector_functions_safe_mode():
     """
     
     # Test Fed Funds Rate collector function
-    logger.info("Testing collect_fed_funds_rate function (safe mode)")
+    logger.info("Testing collect_monthly_fed_funds_rate function (safe mode)")
     try:
-        result = collect_fed_funds_rate(database_url=None)
+        result = collect_monthly_fed_funds_rate(database_url=None)
         assert isinstance(result, int)
         assert result >= 0
         logger.info(f"✅ Fed Funds Rate collector processed {result} records (no DB write)")
@@ -336,7 +336,7 @@ def test_collector_functions_with_database(db_connection):
         pytest.skip("DATABASE_URL not available")
     
     # Test Fed Funds Rate collector function with database
-    logger.info("Testing collect_fed_funds_rate function (with database)")
+    logger.info("Testing collect_monthly_fed_funds_rate function (with database)")
     try:
         result = collect_fed_funds_rate(database_url=database_url)
         assert isinstance(result, int)

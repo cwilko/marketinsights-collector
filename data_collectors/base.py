@@ -24,11 +24,15 @@ class BaseCollector:
             raise
         
     def make_request(self, url: str, params: Dict[str, Any] = None, 
-                    retries: int = 3, backoff_factor: float = 1.0) -> Optional[Dict]:
+                    retries: int = 3, backoff_factor: float = 1.0, headers: Dict[str, str] = None) -> Optional[Dict]:
         """Make HTTP request with retry logic and rate limiting."""
         for attempt in range(retries):
             try:
-                response = self.session.get(url, params=params, timeout=30)
+                # Use provided headers or default session headers
+                if headers:
+                    response = self.session.get(url, params=params, headers=headers, timeout=30)
+                else:
+                    response = self.session.get(url, params=params, timeout=30)
                 response.raise_for_status()
                 return response.json()
             except requests.exceptions.RequestException as e:
@@ -222,6 +226,28 @@ class BaseCollector:
             if conn:
                 conn.close()
     
+    def get_cpi_value_for_date(self, target_date: date, table: str = "consumer_price_index") -> Optional[float]:
+        """Get CPI value for a specific date from the database."""
+        if self.database_url is None:
+            return None
+        
+        conn = None
+        try:
+            conn = self.get_db_connection()
+            with conn.cursor() as cur:
+                cur.execute(f"""
+                    SELECT value FROM {table} 
+                    WHERE date = %s
+                """, (target_date,))
+                result = cur.fetchone()
+                return float(result[0]) if result else None
+        except Exception as e:
+            self.logger.debug(f"Could not get CPI value for date {target_date} from {table}: {str(e)}")
+            return None
+        finally:
+            if conn:
+                conn.close()
+    
     def get_date_range_for_collection(self, table: str, date_column: str = 'date', 
                                     default_lookback_days: int = 365) -> Tuple[Optional[date], Optional[date]]:
         """
@@ -237,9 +263,9 @@ class BaseCollector:
         last_date = self.get_last_record_date(table, date_column)
         
         if last_date is None:
-            # No existing data - fetch historical data
-            start_date = end_date - timedelta(days=default_lookback_days)
-            self.logger.info(f"No existing data in {table}, fetching {default_lookback_days} days of historical data")
+            # No existing data - fetch ALL available historical data (no time limit)
+            start_date = None  # None means fetch all available historical data
+            self.logger.info(f"No existing data in {table}, fetching all available historical data")
         else:
             # Existing data - fetch only new data since last record
             start_date = last_date + timedelta(days=1)

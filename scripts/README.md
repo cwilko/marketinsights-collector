@@ -122,4 +122,46 @@ All data will be lost permanently!
 Proceeding with deletion...
 
 ✅ Database cleanup completed successfully!
+
+## update_cpi_calculations.sql
+
+Retrospectively calculates Year-over-Year and Month-over-Month changes for existing CPI records in the database. This populates historical inflation data that was previously NULL.
+
+### Usage
+
+#### Using the Python wrapper (recommended):
+```bash
+export DATABASE_URL="postgresql://user:password@host:port/database"
+python scripts/run_cpi_retrospective_update.py
 ```
+
+#### Direct SQL execution:
+```bash
+psql $DATABASE_URL -f scripts/update_cpi_calculations.sql
+```
+
+### What it does
+
+1. **Year-over-Year Calculation**: Updates `year_over_year_change` column using 12-month intervals
+2. **Month-over-Month Calculation**: Updates `month_over_month_change` column using 1-month intervals  
+3. **Timestamp Update**: Sets `updated_at` for all modified records
+4. **Summary Report**: Shows count of records updated with calculations
+
+### Requirements
+
+- Existing CPI data in `consumer_price_index` table
+- At least 12+ months of data for meaningful YoY calculations
+- Valid DATABASE_URL environment variable
+
+### Expected Results
+
+- ~235 records updated with YoY data (requires 12-month historical context)
+- ~246 records updated with MoM data (requires 1-month historical context) 
+- YoY inflation range typically -2% to +9% for recent decades
+- Enables inflation charts and metrics in the Streamlit dashboard
+
+### Safety Features
+
+- **Idempotent**: Safe to run multiple times - will recalculate existing values
+- **Transactional**: All updates committed together or rolled back on error
+- **Non-destructive**: Only updates calculated columns, preserves original CPI values
