@@ -118,7 +118,7 @@ class TestUKDataCollectionFunctions:
     def test_uk_collector_functions_safe_mode(self):
         """Test all UK collection functions in safe mode."""
         from data_collectors.economic_indicators import (
-            collect_uk_cpi, collect_uk_unemployment, collect_uk_gdp, collect_uk_bank_rate
+            collect_uk_cpi, collect_uk_unemployment, collect_uk_gdp, collect_uk_monthly_bank_rate
         )
         from data_collectors.uk_market_data import collect_ftse_100, collect_gbp_usd_rate
         
@@ -126,7 +126,7 @@ class TestUKDataCollectionFunctions:
             ("UK CPI", collect_uk_cpi),
             ("UK Unemployment", collect_uk_unemployment),
             ("UK GDP", collect_uk_gdp),
-            ("UK Bank Rate", collect_uk_bank_rate),
+            ("UK Bank Rate (Monthly)", collect_uk_monthly_bank_rate),
             ("FTSE 100", collect_ftse_100),
             ("GBP/USD", collect_gbp_usd_rate)
         ]

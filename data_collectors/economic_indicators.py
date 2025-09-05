@@ -753,8 +753,7 @@ def collect_uk_cpi(database_url=None):
     
     # Get date range for collection
     start_date, end_date = collector.get_date_range_for_collection(
-        table="uk_consumer_price_index",
-        default_lookback_days=10*365  # 10 years of historical data
+        table="uk_consumer_price_index"
     )
     
     if start_date is None and end_date is None:
@@ -936,8 +935,7 @@ def collect_uk_unemployment(database_url=None):
     
     # Get date range for collection
     start_date, end_date = collector.get_date_range_for_collection(
-        table="uk_unemployment_rate",
-        default_lookback_days=10*365  # 10 years of historical data
+        table="uk_unemployment_rate"
     )
     
     if start_date is None and end_date is None:
@@ -1090,8 +1088,7 @@ def collect_uk_gdp(database_url=None):
     # Get date range for collection
     start_date, end_date = collector.get_date_range_for_collection(
         table="uk_gross_domestic_product",
-        date_column="date",  # Using date instead of quarter for monthly GDP data
-        default_lookback_days=10*365  # 10 years of historical data
+        date_column="date"  # Using date instead of quarter for monthly GDP data
     )
     
     if start_date is None and end_date is None:
@@ -1219,7 +1216,7 @@ def collect_uk_monthly_bank_rate(database_url=None):
     # Get date range for collection
     start_date, end_date = collector.get_date_range_for_collection(
         table="uk_monthly_bank_rate",
-        default_lookback_days=10*365  # 10 years of historical data
+        default_lookback_days=50*365  # 50 years of historical data (covers 1975-present)
     )
     
     if start_date is None and end_date is None:
@@ -1236,8 +1233,8 @@ def collect_uk_monthly_bank_rate(database_url=None):
         if start_date:
             boe_start_date = start_date.strftime("%d/%b/%Y")
         else:
-            # Get all available historical data
-            boe_start_date = "01/Jan/1990"  # Bank Rate historical data goes back to 1990s
+            # Get all available historical data - IUMABEDR series goes back to January 1975
+            boe_start_date = "01/Jan/1975"  # Bank Rate monthly average data available from Jan 1975
             
         boe_end_date = end_date.strftime("%d/%b/%Y")
         
@@ -1320,8 +1317,7 @@ def collect_uk_daily_bank_rate(database_url=None):
     
     # Get date range for collection
     start_date, end_date = collector.get_date_range_for_collection(
-        table="uk_daily_bank_rate",
-        default_lookback_days=2*365  # 2 years of daily data (like US daily fed funds)
+        table="uk_daily_bank_rate"
     )
     
     if start_date is None and end_date is None:
@@ -1338,8 +1334,8 @@ def collect_uk_daily_bank_rate(database_url=None):
         if start_date:
             boe_start_date = start_date.strftime("%d/%b/%Y")
         else:
-            # Get all available historical data
-            boe_start_date = "01/Jan/1990"  # Bank Rate historical data goes back to 1990s
+            # Get all available historical data - IUDBEDR daily series goes back to January 1975
+            boe_start_date = "01/Jan/1975"  # Daily Bank Rate data available from Jan 1975
             
         boe_end_date = end_date.strftime("%d/%b/%Y")
         
@@ -1416,11 +1412,6 @@ def collect_uk_daily_bank_rate(database_url=None):
         collector.logger.info("No valid UK Daily Bank Rate data to process")
         return 0
 
-# Backward compatibility alias
-def collect_uk_bank_rate(database_url=None):
-    """Backward compatibility alias for collect_uk_monthly_bank_rate."""
-    return collect_uk_monthly_bank_rate(database_url)
-
 def collect_uk_gilt_yields(database_url=None):
     """Collect UK gilt yields (5Y, 10Y, 20Y) data with incremental updates using Bank of England IADB."""
     from datetime import timedelta
@@ -1429,8 +1420,7 @@ def collect_uk_gilt_yields(database_url=None):
     
     # Get date range for collection
     start_date, end_date = collector.get_date_range_for_collection(
-        table="uk_gilt_yields",
-        default_lookback_days=5*365  # 5 years of historical data
+        table="uk_gilt_yields"
     )
     
     if start_date is None and end_date is None:
@@ -1439,9 +1429,8 @@ def collect_uk_gilt_yields(database_url=None):
     
     # Convert dates to BoE format (DD/MMM/YYYY)
     if start_date is None:
-        # Get full historical data for initial collection
-        start_dt = end_date - timedelta(days=5*365)  # 5 years back
-        start_date_str = start_dt.strftime("%d/%b/%Y")
+        # Get all available historical data - gilt yields available from 1970
+        start_date_str = "01/Jan/1970"  # Start from earliest available gilt yields data
     else:
         start_date_str = start_date.strftime("%d/%b/%Y")
         
