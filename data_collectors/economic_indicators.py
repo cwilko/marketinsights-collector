@@ -1058,6 +1058,11 @@ def collect_uk_unemployment(database_url=None):
             # Skip if we couldn't parse date or value
             if obs_date is None or obs_value is None:
                 continue
+            
+            # Filter out raw counts, keep only percentage rates (unemployment rates should be < 100%)
+            if obs_value > 100:
+                collector.logger.warning(f"Filtering out raw count value {obs_value} at {obs_date} (expected percentage)")
+                continue
                 
             # Only process data within our target date range
             if (start_date and obs_date < start_date) or obs_date > end_date:
