@@ -439,8 +439,7 @@ def collect_cpi(database_url=None):
     
     # Get date range for collection
     start_date, end_date = collector.get_date_range_for_collection(
-        table="consumer_price_index",
-        default_lookback_days=10*365  # 10 years of historical data
+        table="consumer_price_index"
     )
     
     if start_date is None and end_date is None:
@@ -552,8 +551,7 @@ def collect_monthly_fed_funds_rate(database_url=None):
     
     # Get date range for collection (incremental or historical)
     start_date, end_date = collector.get_date_range_for_collection(
-        table="federal_funds_rate",
-        default_lookback_days=10*365  # 10 years of historical data
+        table="federal_funds_rate"
     )
     
     if start_date is None and end_date is None:
@@ -605,8 +603,7 @@ def collect_unemployment_rate(database_url=None):
     
     # Get date range for collection
     start_date, end_date = collector.get_date_range_for_collection(
-        table="unemployment_rate",
-        default_lookback_days=10*365  # 10 years of historical data
+        table="unemployment_rate"
     )
     
     if start_date is None and end_date is None:
@@ -662,8 +659,7 @@ def collect_daily_fed_funds_rate(database_url=None):
     
     # Get date range for collection
     start_date, end_date = collector.get_date_range_for_collection(
-        table="daily_federal_funds_rate",
-        default_lookback_days=2*365  # 2 years of daily data
+        table="daily_federal_funds_rate"
     )
     
     if start_date is None and end_date is None:
@@ -768,11 +764,9 @@ def collect_uk_cpi(database_url=None):
         collector.logger.info(f"Attempting to fetch UK CPI data from dataset: {dataset_id}")
         
         # Use the correct ONS API structure with dimensions
-        # Use latest version (61) which has complete historical data back to 1980s
         # geography=K02000001 (UK), aggregate=CP00 (All items CPIH)
         observations = collector.get_dataset_data(
             dataset_id=dataset_id,
-            version="61",  # Explicitly use version 61 which has full historical coverage
             time_constraint="*",  # Get all time periods
             geography="K02000001",  # UK
             aggregate="CP00"  # All items CPIH
@@ -1032,7 +1026,13 @@ def collect_uk_unemployment(database_url=None):
                                         obs_date = datetime(year, month, 1).date()
                         elif len(time_str) == 6 and "-" in time_str:  # MMM-YY format
                             month_abbr, year_suffix = time_str.split("-")
-                            full_year = 2000 + int(year_suffix)
+                            # Convert 2-digit year to 4-digit
+                            # Years 00-29 assume 20XX, years 30-99 assume 19XX (handles 1980s-1990s data)
+                            year_int = int(year_suffix)
+                            if year_int <= 29:
+                                full_year = 2000 + year_int  # 00-29 -> 2000-2029
+                            else:
+                                full_year = 1900 + year_int  # 30-99 -> 1930-1999
                             month_map = {
                                 'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
                                 'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12
@@ -1156,7 +1156,13 @@ def collect_uk_gdp(database_url=None):
                     try:
                         if len(time_str) == 6 and "-" in time_str:  # MMM-YY format
                             month_abbr, year_suffix = time_str.split("-")
-                            full_year = 2000 + int(year_suffix)
+                            # Convert 2-digit year to 4-digit
+                            # Years 00-29 assume 20XX, years 30-99 assume 19XX (handles 1980s-1990s data)
+                            year_int = int(year_suffix)
+                            if year_int <= 29:
+                                full_year = 2000 + year_int  # 00-29 -> 2000-2029
+                            else:
+                                full_year = 1900 + year_int  # 30-99 -> 1930-1999
                             month_map = {
                                 'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
                                 'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12
@@ -1222,8 +1228,7 @@ def collect_uk_monthly_bank_rate(database_url=None):
     
     # Get date range for collection
     start_date, end_date = collector.get_date_range_for_collection(
-        table="uk_monthly_bank_rate",
-        default_lookback_days=50*365  # 50 years of historical data (covers 1975-present)
+        table="uk_monthly_bank_rate"
     )
     
     if start_date is None and end_date is None:
