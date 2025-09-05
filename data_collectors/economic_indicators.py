@@ -768,12 +768,14 @@ def collect_uk_cpi(database_url=None):
         collector.logger.info(f"Attempting to fetch UK CPI data from dataset: {dataset_id}")
         
         # Use the correct ONS API structure with dimensions
-        # geography=K02000001 (UK), aggregate=CP00 (All items CPIH)
+        # Use version 6 which has historical data back to 1980s (version 61+ have limited history)
+        # geography=K02000001 (UK), aggregate=cpih1dim1A0 (All items CPIH for v6)
         observations = collector.get_dataset_data(
             dataset_id=dataset_id,
+            version="6",  # Specify version 6 for full historical data back to 1980s
             time_constraint="*",  # Get all time periods
             geography="K02000001",  # UK
-            aggregate="CP00"  # All items CPIH
+            aggregate="cpih1dim1A0"  # All items CPIH (correct code for version 6)
         )
         
         if not observations:
