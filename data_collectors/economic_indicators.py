@@ -768,14 +768,14 @@ def collect_uk_cpi(database_url=None):
         collector.logger.info(f"Attempting to fetch UK CPI data from dataset: {dataset_id}")
         
         # Use the correct ONS API structure with dimensions
-        # Use version 6 which has historical data back to 1980s (version 61+ have limited history)
-        # geography=K02000001 (UK), aggregate=cpih1dim1A0 (All items CPIH for v6)
+        # Use latest version (61) which has complete historical data back to 1980s
+        # geography=K02000001 (UK), aggregate=CP00 (All items CPIH)
         observations = collector.get_dataset_data(
             dataset_id=dataset_id,
-            version="6",  # Specify version 6 for full historical data back to 1980s
+            version="61",  # Explicitly use version 61 which has full historical coverage
             time_constraint="*",  # Get all time periods
             geography="K02000001",  # UK
-            aggregate="cpih1dim1A0"  # All items CPIH (correct code for version 6)
+            aggregate="CP00"  # All items CPIH
         )
         
         if not observations:
@@ -817,8 +817,13 @@ def collect_uk_cpi(database_url=None):
                         # Handle "Aug-15" format (3-letter month abbreviation)
                         if len(time_str) == 6 and "-" in time_str:  # MMM-YY
                             month_abbr, year_suffix = time_str.split("-")
-                            # Convert 2-digit year to 4-digit (assume 20XX for years 00-99)
-                            full_year = 2000 + int(year_suffix)
+                            # Convert 2-digit year to 4-digit
+                            # Years 00-29 assume 20XX, years 30-99 assume 19XX (handles 1980s-1990s data)
+                            year_int = int(year_suffix)
+                            if year_int <= 29:
+                                full_year = 2000 + year_int  # 00-29 -> 2000-2029
+                            else:
+                                full_year = 1900 + year_int  # 30-99 -> 1930-1999
                             # Convert month abbreviation to number
                             month_map = {
                                 'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4, 'May': 5, 'Jun': 6,
