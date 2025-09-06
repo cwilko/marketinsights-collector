@@ -156,12 +156,12 @@ class ONSCollector(BaseCollector):
             self.logger.error(f"Failed to fetch ONS datasets: {str(e)}")
             return []
     
-    def get_latest_dataset_version(self, dataset_id: str) -> str:
-        """Get the latest version number for a specific dataset."""
+    def get_latest_dataset_version(self, dataset_id: str, edition: str = "time-series") -> str:
+        """Get the latest version number for a specific dataset and edition."""
         try:
-            # Query the specific dataset endpoint to get latest version
-            dataset_endpoint = f"{self.base_url}/datasets/{dataset_id}"
-            data = self.make_request(dataset_endpoint, {})
+            # Query the specific dataset edition endpoint to get latest version
+            edition_endpoint = f"{self.base_url}/datasets/{dataset_id}/editions/{edition}"
+            data = self.make_request(edition_endpoint, {})
             
             if data and "links" in data:
                 links = data["links"]
@@ -175,32 +175,33 @@ class ONSCollector(BaseCollector):
                             version_idx = version_parts.index('versions')
                             if version_idx + 1 < len(version_parts):
                                 version = version_parts[version_idx + 1]
-                                self.logger.info(f"Found latest version {version} for dataset {dataset_id}")
+                                self.logger.info(f"Found latest version {version} for dataset {dataset_id} edition {edition}")
                                 return version
             
-            self.logger.warning(f"Could not determine latest version for dataset {dataset_id}")
+            self.logger.warning(f"Could not determine latest version for dataset {dataset_id} edition {edition}")
             return "latest"
             
         except Exception as e:
-            self.logger.error(f"Failed to get latest version for {dataset_id}: {str(e)}")
+            self.logger.error(f"Failed to get latest version for {dataset_id} edition {edition}: {str(e)}")
             return "latest"
 
-    def get_dataset_data(self, dataset_id: str, version: str = None, time_constraint: str = "*", 
-                        **dimensions) -> List[Dict]:
+    def get_dataset_data(self, dataset_id: str, version: str = None, edition: str = "time-series", 
+                        time_constraint: str = "*", **dimensions) -> List[Dict]:
         """
         Get data for a specific ONS dataset with proper parameters.
         
         Args:
             dataset_id: ONS dataset identifier (e.g., 'cpih01', 'labour-market')
             version: Version number (if None, will automatically get latest version)
+            edition: Dataset edition (default 'time-series', or 'PWT24', etc.)
             time_constraint: Time filter (default '*' for all time periods)
             **dimensions: Any dimension parameters (e.g., geography, aggregate, economicactivity, etc.)
         """
         # Always get the latest version if not specified
         if version is None:
-            version = self.get_latest_dataset_version(dataset_id)
+            version = self.get_latest_dataset_version(dataset_id, edition)
         
-        endpoint = f"{self.base_url}/datasets/{dataset_id}/editions/time-series/versions/{version}/observations"
+        endpoint = f"{self.base_url}/datasets/{dataset_id}/editions/{edition}/versions/{version}/observations"
         
         params = {"time": time_constraint}
         # Add all dimension parameters
@@ -943,8 +944,9 @@ def collect_uk_unemployment(database_url=None):
         collector.logger.info("UK unemployment data is already up to date")
         return 0
     
-    # Use labour-market dataset with proper ONS API dimensions
+    # Use labour-market dataset with PWT24 edition for current data
     dataset_id = "labour-market"
+    edition = "PWT24"  # People in Work Tables 2024 - has current data to 2025
     
     try:
         collector.logger.info(f"Attempting to fetch UK unemployment data from dataset: {dataset_id}")
@@ -955,6 +957,7 @@ def collect_uk_unemployment(database_url=None):
         # seasonaladjustment=seasonal-adjustment, sex=all-adults, agegroups=16+
         observations = collector.get_dataset_data(
             dataset_id=dataset_id,
+            edition=edition,
             time_constraint="*",  # Get all time periods
             geography="K02000001",  # UK
             economicactivity="unemployed",  # Unemployed
