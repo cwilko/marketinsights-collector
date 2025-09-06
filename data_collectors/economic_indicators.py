@@ -1000,8 +1000,8 @@ def collect_uk_unemployment(database_url=None):
                 if time_str:
                     # ONS unemployment data uses "jul-sep-2016" format (quarterly)
                     try:
-                        if "-" in time_str and len(time_str) > 6:  # Handle quarterly format
-                            # Parse formats like "jul-sep-2016" or "Jan-Mar 2016"
+                        if "-" in time_str and len(time_str) > 6:  # Handle rolling quarterly format
+                            # Parse formats like "jul-sep-2016", "mar-may-2013", "jun-aug-2013"
                             parts = time_str.lower().split("-")
                             if len(parts) >= 2:
                                 # Extract year (last part or look for 4-digit number)
@@ -1011,19 +1011,47 @@ def collect_uk_unemployment(database_url=None):
                                         year_str = part
                                         break
                                 
-                                if year_str:
+                                if year_str and len(parts) >= 2:
                                     year = int(year_str)
-                                    # Use the middle month of the quarter as approximation
-                                    first_month = parts[0].strip()
-                                    month_map = {
-                                        'jan': 2, 'feb': 2, 'mar': 2,  # Q1 -> Feb (middle)
-                                        'apr': 5, 'may': 5, 'jun': 5,  # Q2 -> May
-                                        'jul': 8, 'aug': 8, 'sep': 8,  # Q3 -> Aug
-                                        'oct': 11, 'nov': 11, 'dec': 11  # Q4 -> Nov
+                                    # Parse rolling quarterly periods (e.g., "jul-sep", "mar-may")
+                                    first_month_str = parts[0].strip()
+                                    second_month_str = parts[1].strip() if not parts[1].isdigit() else parts[1].replace(year_str, '').strip()
+                                    
+                                    # Month name to number mapping
+                                    month_names = {
+                                        'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
+                                        'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12
                                     }
-                                    if first_month in month_map:
-                                        month = month_map[first_month]
-                                        obs_date = datetime(year, month, 1).date()
+                                    
+                                    if first_month_str in month_names and second_month_str in month_names:
+                                        start_month = month_names[first_month_str]
+                                        end_month = month_names[second_month_str]
+                                        
+                                        # Calculate the true middle month of the rolling 3-month period
+                                        if end_month >= start_month:
+                                            # Normal case: jul-sep (7,8,9) -> middle = 8
+                                            middle_month = start_month + 1
+                                            target_year = year
+                                        else:
+                                            # Year boundary case: need to handle carefully
+                                            if first_month_str == 'nov' and second_month_str == 'jan':
+                                                # nov-jan-2020: Nov 2019, Dec 2019, Jan 2020 -> middle = Dec 2019
+                                                middle_month = 12
+                                                target_year = year - 1
+                                            elif first_month_str == 'dec' and second_month_str == 'feb':
+                                                # dec-feb-2020: Dec 2019, Jan 2020, Feb 2020 -> middle = Jan 2020
+                                                middle_month = 1
+                                                target_year = year
+                                            else:
+                                                # Other year boundary cases
+                                                middle_month = start_month + 1
+                                                if middle_month > 12:
+                                                    middle_month = 1
+                                                    target_year = year + 1
+                                                else:
+                                                    target_year = year
+                                        
+                                        obs_date = datetime(target_year, middle_month, 1).date()
                         elif len(time_str) == 6 and "-" in time_str:  # MMM-YY format
                             month_abbr, year_suffix = time_str.split("-")
                             # Convert 2-digit year to 4-digit
