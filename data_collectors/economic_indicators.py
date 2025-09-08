@@ -1541,6 +1541,49 @@ class BoEYieldCurveCollector(BaseCollector):
         
         return 0
     
+    def get_yield_type_date_range(self, yield_type):
+        """Get date range for collection for a specific yield type."""
+        from datetime import datetime
+        
+        end_date = datetime.now().date()
+        
+        if self.database_url is None:
+            # Safe mode - always return None to collect all historical data
+            return None, end_date
+        
+        try:
+            import psycopg2
+            conn = psycopg2.connect(self.database_url)
+            cursor = conn.cursor()
+            
+            # Check for existing data for this specific yield type
+            cursor.execute("""
+                SELECT MAX(date) FROM boe_yield_curves 
+                WHERE yield_type = %s
+            """, (yield_type,))
+            
+            result = cursor.fetchone()
+            cursor.close()
+            conn.close()
+            
+            if result and result[0]:
+                # Data exists for this yield type, collect from next day
+                from datetime import timedelta
+                start_date = result[0] + timedelta(days=1)
+                self.logger.info(f"Fetching incremental data for boe_yield_curves from {start_date} to {end_date}")
+                return start_date, end_date
+            else:
+                # No data exists for this yield type - collect all historical data
+                self.logger.info(f"No existing data in boe_yield_curves, fetching all available historical data")
+                return None, end_date
+                
+        except Exception as e:
+            self.logger.warning(f"Could not check existing data for {yield_type}: {e}")
+            # Fallback to collecting recent data only
+            from datetime import timedelta
+            start_date = end_date - timedelta(days=365)
+            return start_date, end_date
+
     def collect_all_yield_types(self, yield_types, include_historical=True):
         """
         Collect all yield types by downloading shared ZIP files once and processing all yield types.
@@ -1583,12 +1626,8 @@ class BoEYieldCurveCollector(BaseCollector):
                             latest_data.extend(data)
                             self.logger.info(f"Extracted {len(data)} {yield_type} records from {filename}")
                 
-                # Step 4: Determine date range and check if historical data needed
-                # Note: We can't filter by yield_type in base method, so we check all yield curves
-                start_date, end_date = self.get_date_range_for_collection(
-                    table="boe_yield_curves",
-                    default_lookback_days=5*365
-                )
+                # Step 4: Determine date range and check if historical data needed (yield type specific)
+                start_date, end_date = self.get_yield_type_date_range(yield_type)
                 
                 # Step 5: Handle historical data if needed (yield type specific)
                 # Collect historical data if: 1) empty database (start_date=None), or 2) gap detected
