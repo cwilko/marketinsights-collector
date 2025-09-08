@@ -1576,9 +1576,9 @@ class BoEYieldCurveCollector(BaseCollector):
                 latest_data = []
                 for file_path in latest_files:
                     filename = os.path.basename(file_path)
-                    if source_config['file_prefix'] in filename and 'current month' not in filename:
+                    if source_config['file_prefix'] in filename and 'current month' in filename:
                         self.logger.info(f"Processing latest file: {filename}")
-                        data = self.parse_yield_data(file_path, yield_type, source_config['sheet'])
+                        data = self.parse_yield_data(file_path, yield_type)
                         if data:
                             latest_data.extend(data)
                             self.logger.info(f"Extracted {len(data)} {yield_type} records from {filename}")
@@ -1591,13 +1591,24 @@ class BoEYieldCurveCollector(BaseCollector):
                 )
                 
                 # Step 5: Handle historical data if needed (yield type specific)
-                if include_historical and start_date and latest_data:
+                # Collect historical data if: 1) empty database (start_date=None), or 2) gap detected
+                if include_historical and latest_data and (start_date is None or start_date):
                     # Check if latest data covers the gap
                     data_start = min(d['date'] for d in latest_data)
-                    if data_start > start_date:
+                    
+                    # Determine if we should collect historical data
+                    should_collect_historical = False
+                    if start_date is None:
+                        # Empty database - collect all historical data (safe mode or production)
+                        should_collect_historical = True
+                        mode = "safe mode" if self.database_url is None else "production"
+                        self.logger.info(f"Empty database ({mode}): collecting all historical data for {yield_type}")
+                    elif start_date and data_start > start_date:
                         gap_days = (data_start - start_date).days
+                        should_collect_historical = True
                         self.logger.info(f"Gap detected for {yield_type}: {gap_days} days, downloading historical data")
-                        
+                    
+                    if should_collect_historical:
                         # Download and extract historical ZIP for this specific yield type
                         historical_zip_name = source_config['historical']
                         historical_temp_dir = os.path.join(temp_dir, f'{yield_type}_historical')
@@ -1609,10 +1620,13 @@ class BoEYieldCurveCollector(BaseCollector):
                             for file_path in historical_files:
                                 filename = os.path.basename(file_path)
                                 if source_config['file_prefix'] in filename and 'current month' not in filename:
-                                    data = self.parse_yield_data(file_path, yield_type, source_config['sheet'])
+                                    data = self.parse_yield_data(file_path, yield_type)
                                     if data:
-                                        # Only collect gap data
-                                        gap_data = [d for d in data if start_date <= d['date'] < data_start]
+                                        # Filter historical data based on scenario
+                                        if start_date is None:  # Empty database - collect all historical data
+                                            gap_data = [d for d in data if d['date'] < data_start]
+                                        else:  # Incremental update - only collect gap data
+                                            gap_data = [d for d in data if start_date <= d['date'] < data_start]
                                         if gap_data:
                                             latest_data.extend(gap_data)
                                             self.logger.info(f"Added {len(gap_data)} historical {yield_type} records")
