@@ -2,7 +2,7 @@
 
 This document provides a comprehensive overview of all metrics collected by the econometrics data pipeline, including their sources, update frequencies, and historical data coverage.
 
-## 📊 Economic Indicators
+## 🇺🇸 US Economic Indicators
 
 | Metric | Function | Source | Series/Dataset | Frequency | Update Schedule | History | Database Table |
 |--------|----------|--------|----------------|-----------|----------------|---------|----------------|
@@ -43,6 +43,8 @@ This document provides a comprehensive overview of all metrics collected by the 
 ## 🔄 Update Patterns & Scheduling
 
 ### Data Release Schedule
+
+**US Economic & Market Data:**
 | Metric | Frequency | Typical Release Time | Delay |
 |--------|-----------|---------------------|-------|
 | Daily Fed Funds Rate | Daily | Next business day, 4:30 PM ET | 1 day |
@@ -55,43 +57,90 @@ This document provides a comprehensive overview of all metrics collected by the 
 | Unemployment | Monthly | 1st Friday of next month | ~5 days |
 | GDP | Quarterly | ~30 days after quarter end | ~90 days |
 
+**UK Economic & Market Data:**
+| Metric | Frequency | Typical Release Time | Delay |
+|--------|-----------|---------------------|-------|
+| FTSE 100 | Daily | End of trading day, ~4:30 PM GMT | Same day |
+| BoE Yield Curves | Daily | Next business day | 1 day |
+| UK Bank Rate | Monthly | Next month for previous month | ~30 days |
+| UK CPI (CPIH) | Monthly | Mid-month for previous month | ~15 days |
+| UK GDP (Monthly) | Monthly | ~40 days after month end | ~40 days |
+| UK Unemployment | Quarterly | ~45 days after quarter end | ~45 days |
+| GBP/USD | Daily | End of trading day | Same day |
+
 ### Incremental Collection Strategy
+
+**All Markets (US & UK):**
 - **Empty Database**: Collects full historical period (see coverage above)
 - **Existing Data**: Only fetches records since last stored date
 - **Daily Check**: Pipeline runs daily, automatically skips if data is current
 - **Bulk Fetching**: Uses API date ranges to minimize API calls
+- **Multi-region**: Parallel collection of US and UK data sources
 
 ## 📊 Data Volume Estimates
 
 ### Annual Data Points (Approximate)
+
+**US Market Data:**
 - **Daily Metrics**: ~250 records/year (business days)
   - S&P 500, VIX: 250 records/year each
-  - Treasury Yields: 250 × 13 maturities = 3,250 records/year
+  - Treasury Yields: 250 × 10 maturities = 2,500 records/year
   - Daily Fed Funds: 250 records/year
 - **Monthly Metrics**: ~12 records/year
   - CPI, Unemployment, Monthly Fed Funds: 12 records/year each
 - **Quarterly Metrics**: ~4 records/year
   - GDP: 4 records/year
 
-### Total Annual Volume: ~4,300 new records per year
+**UK Market Data:**
+- **Daily Metrics**: ~250 records/year (business days)
+  - FTSE 100: 250 records/year
+  - BoE Yield Curves: 250 × 80+ maturities × 4 types = 80,000+ records/year
+  - GBP/USD: 250 records/year
+- **Monthly Metrics**: ~12 records/year
+  - UK CPI, UK GDP, UK Bank Rate: 12 records/year each
+- **Quarterly Metrics**: ~4 records/year
+  - UK Unemployment: 4 records/year
+
+### Total Annual Volume: ~15,000 new records per year (US + UK combined)
+
+**US Market Data**: ~4,300 records/year
+**UK Market Data**: ~11,000 records/year (includes comprehensive BoE yield curves)
 
 ## 🔧 API Specifications
 
 ### Rate Limits & Authentication
+
+**US Data Sources:**
 | API | Rate Limit | Authentication | Cost |
 |-----|------------|----------------|------|
 | FRED | 120 calls/minute | API Key (required) | Free |
 | BLS | 500 calls/day (with key), 25/day (without) | API Key (optional) | Free |
 | BEA | 1,000 calls/day | API Key (required) | Free |
-| FRED (Treasury) | 120 calls/minute | API Key (required) | Free |
 | multpl.com | No published limit | None (web scraping) | Free |
 
+**UK Data Sources:**
+| API | Rate Limit | Authentication | Cost |
+|-----|------------|----------------|------|
+| ONS Beta API | No published limit | None | Free |
+| Bank of England IADB | No published limit | None | Free |
+| Bank of England ZIP files | No published limit | None | Free |
+| MarketWatch | No published limit | None (web scraping) | Free |
+| Alpha Vantage (GBP/USD) | 5 calls/minute (free tier) | API Key (required) | Free tier available |
+
 ### Bulk Fetching Capabilities
+
+**US APIs:**
 - **FRED**: ✅ Date ranges (`observation_start`/`observation_end`)
 - **BLS**: ✅ Multi-year requests (up to 20 years with API key)
 - **BEA**: ✅ "ALL" years parameter for full history
-- **FRED (Treasury)**: ✅ Date ranges (`observation_start`/`observation_end`) for each series
 - **multpl.com**: ❌ Current values only (no historical API)
+
+**UK APIs:**
+- **ONS Beta API**: ✅ Full historical data with `time=*` parameter
+- **Bank of England IADB**: ✅ Date ranges (`Datefrom`/`Dateto`)
+- **Bank of England ZIP**: ✅ Complete historical and latest data files
+- **MarketWatch**: ✅ Up to 1 year per request (sequential calls for longer periods)
+- **Alpha Vantage**: ✅ Full historical data (with API key)
 
 ## 🎯 Collection Efficiency
 
@@ -102,4 +151,44 @@ The pipeline is optimized for minimal API usage through:
 - **Rate limiting**: Automatic delays to respect API limits
 - **Error handling**: Graceful failures with retry logic
 
-This design ensures efficient, reliable collection of comprehensive economic and market data while respecting API provider constraints.
+## 🇬🇧 UK Economic Indicators
+
+| Metric | Function | Source | Series/Dataset | Frequency | Update Schedule | History | Database Table |
+|--------|----------|--------|----------------|-----------|----------------|---------|----------------|
+| **Consumer Price Index (CPIH)** | `collect_uk_cpi()` | ONS Beta API | `cpih01` | Monthly | Mid-month for previous month | 25+ years | `uk_consumer_price_index` |
+| **Unemployment Rate** | `collect_uk_unemployment()` | ONS Beta API | `labour-market` | Quarterly | Variable (quarterly) | 9+ years | `uk_unemployment_rate` |
+| **GDP (Monthly Index)** | `collect_uk_gdp()` | ONS Beta API | `gdp-to-four-decimal-places` | Monthly | ~40 days after month end | 25+ years | `uk_gross_domestic_product` |
+| **Bank Rate** | `collect_uk_monthly_bank_rate()` | Bank of England IADB | `IUMABEDR` | Monthly | Next month for previous month | 35+ years | `uk_monthly_bank_rate` |
+| **BoE Yield Curves** | `collect_boe_yield_curves()` | Bank of England ZIP files | Comprehensive yield data | Daily | Next business day | 10+ years | `boe_yield_curves` |
+
+### Key Fields by Metric
+- **UK CPI**: `date`, `value`, `year_over_year_change`
+- **UK Unemployment**: `date`, `rate`
+- **UK GDP**: `date`, `gdp_index`
+- **UK Bank Rate**: `date`, `rate`
+- **BoE Yield Curves**: `date`, `maturity_years`, `yield_rate`, `yield_type`
+
+### BoE Yield Curve Coverage
+**Comprehensive maturity coverage (80+ points):**
+- **Short-term**: 0.5Y, 1Y, 1.5Y, 2Y, 2.5Y, 3Y
+- **Medium-term**: 4Y, 5Y, 6Y, 7Y, 8Y, 9Y, 10Y, 12Y, 15Y
+- **Long-term**: 20Y, 25Y, 30Y, 40Y, 50Y+
+
+**Four yield types collected:**
+- **Nominal**: Standard government bond yields
+- **Real**: Inflation-indexed bond yields
+- **Inflation**: Implied inflation expectations
+- **OIS**: Overnight Index Swap rates
+
+## 🇬🇧 UK Market Data
+
+| Metric | Function | Source | Series/Dataset | Frequency | Update Schedule | History | Database Table |
+|--------|----------|--------|----------------|-----------|----------------|---------|----------------|
+| **FTSE 100 Index** | `collect_ftse_100()` | MarketWatch + Historical CSV | `UKX` | Daily | End of trading day | 24+ years (2001-present) | `ftse_100_index` |
+| **GBP/USD Exchange Rate** | `collect_gbp_usd()` | Alpha Vantage (requires API key) | `FX_DAILY` | Daily | End of trading day | 20+ years | `gbp_usd_exchange_rate` |
+
+### Key Fields by Metric
+- **FTSE 100**: `date`, `open_price`, `high_price`, `low_price`, `close_price`, `volume`
+- **GBP/USD**: `date`, `exchange_rate`
+
+This design ensures efficient, reliable collection of comprehensive US and UK economic and market data while respecting API provider constraints.

@@ -189,7 +189,6 @@ class TestUKDataValidation:
             "uk_monthly_bank_rate",
             "uk_daily_bank_rate", 
             "ftse_100_index",
-            "uk_gilt_yields",
             "boe_yield_curves",
             "gbp_usd_exchange_rate"
         ]
