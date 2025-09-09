@@ -4,7 +4,8 @@ Tests for UK data collectors including ONS and Bank of England APIs.
 
 import pytest
 from datetime import datetime
-from data_collectors.economic_indicators import ONSCollector, BankOfEnglandCollector, GiltMarketCollector, collect_gilt_market_prices
+from data_collectors.economic_indicators import ONSCollector, BankOfEnglandCollector
+from data_collectors.gilt_market_data import GiltMarketCollector, collect_gilt_market_prices
 from data_collectors.uk_market_data import MarketWatchFTSECollector
 
 

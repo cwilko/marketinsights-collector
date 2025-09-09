@@ -12,6 +12,13 @@ setup(
         "beautifulsoup4>=4.12.0",
         "lxml>=4.9.0",
     ],
+    extras_require={
+        "gilt_market": [
+            "scipy>=1.11.0",
+            "selenium>=4.15.0",
+            "webdriver-manager>=4.0.0",
+        ],
+    },
     python_requires=">=3.8",
     classifiers=[
         "Development Status :: 3 - Alpha",

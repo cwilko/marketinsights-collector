@@ -1,16 +1,7 @@
 import json
 import time
-import re
-import tempfile
-import os
 from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional
-from scipy.optimize import fsolve
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
+from typing import Dict, Any, List
 from .base import BaseCollector
 
 class BLSCollector(BaseCollector):
@@ -80,356 +71,6 @@ class BLSCollector(BaseCollector):
         
         self.logger.info(f"Total retrieved {len(all_data)} observations for {series_id}")
         return all_data
-
-class GiltMarketCollector(BaseCollector):
-    """
-    Collector for real-time gilt market prices from Hargreaves Lansdown broker.
-    Scrapes gilt prices and calculates yields, accrued interest, and after-tax metrics.
-    """
-    
-    def __init__(self, database_url=None):
-        super().__init__(database_url)
-        self.base_url = "https://www.hl.co.uk/shares/corporate-bonds-gilts/bond-prices/uk-gilts"
-        self.chrome_options = self._setup_chrome_options()
-    
-    def _setup_chrome_options(self):
-        """Configure Chrome options for headless scraping."""
-        options = Options()
-        options.add_argument("--headless")
-        options.add_argument("--no-sandbox")
-        options.add_argument("--disable-dev-shm-usage")
-        options.add_argument("--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
-        return options
-    
-    def calculate_accrued_interest(self, face_value: float, coupon_rate: float, 
-                                 last_coupon_date: datetime, settlement_date: datetime, 
-                                 payments_per_year: int = 2) -> float:
-        """Calculate accrued interest since last coupon payment."""
-        annual_coupon = coupon_rate * face_value
-        coupon_payment = annual_coupon / payments_per_year
-        
-        # Days since last coupon payment
-        days_since_coupon = (settlement_date - last_coupon_date).days
-        
-        # Days in coupon period (assume 6 months = 182.5 days for semi-annual)
-        days_in_period = 365.25 / payments_per_year
-        
-        # Accrued interest = (Days since coupon / Days in period) * Coupon payment
-        accrued = (days_since_coupon / days_in_period) * coupon_payment
-        
-        return accrued
-    
-    def estimate_coupon_dates(self, bond_name: str, maturity_date: datetime, 
-                            settlement_date: datetime) -> datetime:
-        """Estimate coupon payment dates based on maturity date."""
-        # Extract maturity month/day from bond name or maturity date
-        if maturity_date:
-            mat_month = maturity_date.month
-            mat_day = maturity_date.day
-        else:
-            # Default assumption for UK gilts
-            mat_month = 7
-            mat_day = 31
-        
-        year = settlement_date.year
-        
-        # Calculate the two coupon dates per year (6 months apart)
-        if mat_month <= 6:
-            coupon1 = datetime(year, mat_month, mat_day)
-            coupon2 = datetime(year, mat_month + 6, mat_day)
-        else:
-            coupon1 = datetime(year, mat_month - 6, mat_day)
-            coupon2 = datetime(year, mat_month, mat_day)
-        
-        # Handle edge cases for day of month
-        try:
-            coupon1 = datetime(year, coupon1.month, min(coupon1.day, 28))
-            coupon2 = datetime(year, coupon2.month, min(coupon2.day, 28))
-        except:
-            coupon1 = datetime(year, coupon1.month, 28)
-            coupon2 = datetime(year, coupon2.month, 28)
-        
-        # Find the most recent coupon date before settlement
-        if settlement_date >= coupon2:
-            return coupon2
-        elif settlement_date >= coupon1:
-            return coupon1
-        else:
-            # Must be from previous year
-            try:
-                if mat_month <= 6:
-                    return datetime(year - 1, mat_month + 6, min(mat_day, 28))
-                else:
-                    return datetime(year - 1, mat_month, min(mat_day, 28))
-            except:
-                return datetime(year - 1, 7, 31)  # Default fallback
-    
-    def calculate_ytm_from_dirty(self, dirty_price: float, face_value: float, 
-                               coupon_rate: float, years_to_maturity: float, 
-                               payments_per_year: int = 2) -> Optional[float]:
-        """Calculate YTM using dirty price."""
-        coupon_payment = (coupon_rate * face_value) / payments_per_year
-        total_periods = int(years_to_maturity * payments_per_year)
-        
-        def bond_price_equation(ytm):
-            if ytm == 0:
-                return coupon_payment * total_periods + face_value - dirty_price
-            
-            periodic_rate = ytm / payments_per_year
-            present_value_coupons = coupon_payment * (1 - (1 + periodic_rate) ** -total_periods) / periodic_rate
-            present_value_face = face_value / (1 + periodic_rate) ** total_periods
-            
-            return present_value_coupons + present_value_face - dirty_price
-        
-        initial_guess = coupon_rate if coupon_rate > 0 else 0.05
-        
-        try:
-            ytm_solution = fsolve(bond_price_equation, initial_guess)[0]
-            return ytm_solution
-        except:
-            return None
-    
-    def calculate_after_tax_ytm(self, dirty_price: float, face_value: float, 
-                              coupon_rate: float, years_to_maturity: float, 
-                              tax_rate_on_coupons: float = 0.30, 
-                              payments_per_year: int = 2) -> Optional[float]:
-        """
-        Calculate after-tax YTM where:
-        - Coupon payments are taxed at tax_rate_on_coupons
-        - Capital gains are tax-free (typical for UK gilts)
-        """
-        coupon_payment = (coupon_rate * face_value) / payments_per_year
-        after_tax_coupon = coupon_payment * (1 - tax_rate_on_coupons)
-        total_periods = int(years_to_maturity * payments_per_year)
-        
-        def after_tax_bond_equation(ytm):
-            if ytm == 0:
-                return after_tax_coupon * total_periods + face_value - dirty_price
-            
-            periodic_rate = ytm / payments_per_year
-            # Present value of after-tax coupons
-            present_value_coupons = after_tax_coupon * (1 - (1 + periodic_rate) ** -total_periods) / periodic_rate
-            # Present value of face value (no tax on capital gains)
-            present_value_face = face_value / (1 + periodic_rate) ** total_periods
-            
-            return present_value_coupons + present_value_face - dirty_price
-        
-        initial_guess = coupon_rate if coupon_rate > 0 else 0.05
-        
-        try:
-            ytm_solution = fsolve(after_tax_bond_equation, initial_guess)[0]
-            return ytm_solution
-        except:
-            return None
-    
-    def parse_maturity_date(self, date_str: str) -> Optional[datetime]:
-        """Parse various date formats and return datetime object."""
-        date_formats = [
-            '%d/%m/%Y', '%d %b %Y', '%d %B %Y',
-            '%Y-%m-%d', '%b %Y', '%B %Y'
-        ]
-        
-        for fmt in date_formats:
-            try:
-                return datetime.strptime(date_str.strip(), fmt)
-            except ValueError:
-                continue
-        
-        # Handle formats like "Jul 2025" by adding day 1
-        try:
-            parts = date_str.strip().split()
-            if len(parts) == 2:
-                return datetime.strptime(f"01 {date_str.strip()}", '%d %b %Y')
-        except:
-            pass
-        
-        return None
-    
-    def calculate_years_to_maturity(self, maturity_date: datetime) -> Optional[float]:
-        """Calculate years from today to maturity date."""
-        today = datetime.now()
-        if maturity_date <= today:
-            return None
-        
-        days_to_maturity = (maturity_date - today).days
-        return days_to_maturity / 365.25
-    
-    def scrape_gilt_prices(self) -> List[Dict[str, Any]]:
-        """Scrape UK Gilts and calculate YTM based on clean prices."""
-        driver = None
-        try:
-            service = Service(ChromeDriverManager().install())
-            driver = webdriver.Chrome(service=service, options=self.chrome_options)
-            driver.get(self.base_url)
-            
-            # Wait for content to load
-            time.sleep(7)
-            
-            bonds = []
-            settlement_date = datetime.now()
-            
-            # Look for table rows directly
-            rows = driver.find_elements(By.CSS_SELECTOR, "table tr")
-            
-            # Get header to understand structure
-            if len(rows) > 0:
-                header_cells = rows[0].find_elements(By.TAG_NAME, "th")
-                if not header_cells:
-                    header_cells = rows[0].find_elements(By.TAG_NAME, "td")
-                
-                headers = [cell.text.strip().lower() for cell in header_cells]
-                self.logger.info(f"Table structure: {headers}")
-                
-                # Find column indices
-                issuer_col = next((i for i, h in enumerate(headers) if 'issuer' in h), 0)
-                coupon_col = next((i for i, h in enumerate(headers) if 'coupon' in h), 1)
-                maturity_col = next((i for i, h in enumerate(headers) if 'maturity' in h), 2)
-                price_col = next((i for i, h in enumerate(headers) if 'price' in h), 3)
-            
-            for i, row in enumerate(rows[1:]):  # Skip header
-                cells = row.find_elements(By.TAG_NAME, "td")
-                
-                if len(cells) >= 4:
-                    try:
-                        # Get bond name/issuer
-                        bond_name = cells[issuer_col].text.strip()
-                        
-                        # Skip if not a Treasury bond
-                        if 'treasury' not in bond_name.lower():
-                            continue
-                        
-                        # Get coupon rate
-                        coupon_text = cells[coupon_col].text.strip()
-                        coupon_match = re.search(r'(\d+\.?\d*)', coupon_text)
-                        if not coupon_match:
-                            continue
-                        coupon_rate = float(coupon_match.group(1)) / 100
-                        
-                        # Get maturity date
-                        maturity_text = cells[maturity_col].text.strip()
-                        maturity_date = self.parse_maturity_date(maturity_text)
-                        if not maturity_date:
-                            # Try to extract year from bond name and estimate
-                            year_match = re.search(r'20\d{2}', bond_name)
-                            if year_match:
-                                year = int(year_match.group(0))
-                                maturity_date = datetime(year, 7, 15)  # Estimate mid-year
-                            else:
-                                continue
-                        
-                        # Get clean price
-                        price_text = cells[price_col].text.strip()
-                        price_match = re.search(r'(\d+\.?\d*)', price_text)
-                        if not price_match:
-                            continue
-                        
-                        clean_price = float(price_match.group(1))
-                        
-                        # Validate price range (gilts typically trade 20-150)
-                        if not (20 <= clean_price <= 200):
-                            continue
-                        
-                        years_to_maturity = self.calculate_years_to_maturity(maturity_date)
-                        if not years_to_maturity or years_to_maturity <= 0:
-                            continue
-                        
-                        # Calculate accrued interest
-                        last_coupon_date = self.estimate_coupon_dates(bond_name, maturity_date, settlement_date)
-                        accrued_interest = self.calculate_accrued_interest(
-                            100.0, coupon_rate, last_coupon_date, settlement_date
-                        )
-                        
-                        # Calculate dirty price
-                        dirty_price = clean_price + accrued_interest
-                        
-                        # Calculate YTM using dirty price
-                        ytm = self.calculate_ytm_from_dirty(dirty_price, 100.0, coupon_rate, years_to_maturity)
-                        
-                        # Calculate after-tax YTM (30% tax on coupons, no tax on capital gains)
-                        after_tax_ytm = self.calculate_after_tax_ytm(dirty_price, 100.0, coupon_rate, years_to_maturity, 0.30)
-                        
-                        bonds.append({
-                            'bond_name': bond_name.split('\n')[0],  # Take first line
-                            'clean_price': clean_price,
-                            'accrued_interest': accrued_interest,
-                            'dirty_price': dirty_price,
-                            'coupon_rate': coupon_rate,
-                            'maturity_date': maturity_date,
-                            'years_to_maturity': years_to_maturity,
-                            'ytm': ytm,
-                            'after_tax_ytm': after_tax_ytm,
-                            'scraped_at': settlement_date
-                        })
-                        
-                    except Exception as e:
-                        self.logger.debug(f"Error processing bond row {i}: {str(e)}")
-                        continue
-            
-            self.logger.info(f"Successfully scraped {len(bonds)} gilt market prices")
-            return bonds
-            
-        except Exception as e:
-            self.logger.error(f"Scraping error: {e}")
-            return []
-        finally:
-            if driver:
-                try:
-                    driver.quit()
-                except:
-                    pass
-
-
-def collect_gilt_market_prices(database_url=None):
-    """Collect real-time gilt market prices from Hargreaves Lansdown broker."""
-    collector = GiltMarketCollector(database_url)
-    
-    try:
-        # Scrape gilt prices from broker website
-        gilt_data = collector.scrape_gilt_prices()
-        
-        if not gilt_data:
-            collector.logger.info("No gilt market data found")
-            return 0
-        
-        # Process and store data
-        bulk_data = []
-        for gilt in gilt_data:
-            try:
-                # Convert to database format
-                data = {
-                    'bond_name': gilt['bond_name'],
-                    'clean_price': gilt['clean_price'],
-                    'accrued_interest': gilt['accrued_interest'],
-                    'dirty_price': gilt['dirty_price'], 
-                    'coupon_rate': gilt['coupon_rate'],
-                    'maturity_date': gilt['maturity_date'].date(),
-                    'years_to_maturity': gilt['years_to_maturity'],
-                    'ytm': gilt['ytm'],
-                    'after_tax_ytm': gilt['after_tax_ytm'],
-                    'scraped_at': gilt['scraped_at']
-                }
-                bulk_data.append(data)
-                
-            except Exception as e:
-                collector.logger.error(f"Error processing gilt data: {str(e)}")
-                continue
-        
-        # Bulk upsert all records with custom conflict columns
-        if bulk_data:
-            success_count = collector.bulk_upsert_data(
-                "gilt_market_prices", 
-                bulk_data,
-                conflict_columns=['bond_name', 'scraped_at']
-            )
-            collector.logger.info(f"Successfully stored {success_count} gilt market price records")
-            return success_count
-        else:
-            collector.logger.info("No valid gilt market data to process")
-            return 0
-            
-    except Exception as e:
-        collector.logger.error(f"Failed to collect gilt market prices: {str(e)}")
-        return 0
 
 class FREDCollector(BaseCollector):
     def __init__(self, database_url=None):
@@ -693,6 +334,105 @@ class BankOfEnglandCollector(BaseCollector):
             self.logger.error(f"Failed to fetch Bank Rate data for {series_code}: {str(e)}")
             return []
     
+    def get_uk_gilt_yields(self, start_date: str, end_date: str) -> List[Dict]:
+        """
+        Get UK gilt yields for 5Y, 10Y, and 20Y maturities from Bank of England IADB.
+        
+        Args:
+            start_date: Start date in DD/MMM/YYYY format (e.g., "01/Jan/2020")
+            end_date: End date in DD/MMM/YYYY format (e.g., "01/Sep/2025")
+            
+        Returns:
+            List of dictionaries with date, maturity, and yield_rate
+        """
+        url_endpoint = 'http://www.bankofengland.co.uk/boeapps/iadb/fromshowcolumns.asp?csv.x=yes'
+        
+        # UK gilt yield series codes for daily nominal par yields
+        series_codes = 'IUDSNPY,IUDMNPY,IUDLNPY'  # 5Y, 10Y, 20Y
+        
+        payload = {
+            'Datefrom': start_date,
+            'Dateto': end_date,
+            'SeriesCodes': series_codes,
+            'CSVF': 'TN',  # Tabular format, no titles
+            'UsingCodes': 'Y',
+            'VPD': 'Y'
+        }
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        
+        try:
+            self.logger.info(f"Fetching UK gilt yields (5Y, 10Y, 20Y) from {start_date} to {end_date}")
+            response = self.session.get(url_endpoint, params=payload, headers=headers, timeout=30)
+            response.raise_for_status()
+            
+            # Parse CSV data using pandas
+            import pandas as pd
+            import io
+            
+            csv_data = response.text.strip()
+            if not csv_data:
+                self.logger.warning("Empty response for UK gilt yields")
+                return []
+                
+            try:
+                # Use pandas to parse CSV data
+                df = pd.read_csv(io.StringIO(csv_data))
+                
+                if df.empty:
+                    self.logger.warning("No data rows found for UK gilt yields")
+                    return []
+                
+                # Expected columns: DATE, IUDSNPY, IUDMNPY, IUDLNPY
+                # Transform into individual maturity records
+                yield_data = []
+                
+                for _, row in df.iterrows():
+                    try:
+                        date_str = str(row.iloc[0]).strip()  # First column is date
+                        
+                        # Parse BoE date format (e.g., "31 Jan 2024")
+                        from datetime import datetime
+                        obs_date = datetime.strptime(date_str, "%d %b %Y").date()
+                        
+                        # Extract yields for each maturity (columns 1, 2, 3)
+                        maturities = [
+                            ('5Y', 1),   # IUDSNPY - 5 Year
+                            ('10Y', 2),  # IUDMNPY - 10 Year  
+                            ('20Y', 3)   # IUDLNPY - 20 Year
+                        ]
+                        
+                        for maturity, col_idx in maturities:
+                            try:
+                                if col_idx < len(row) and not pd.isna(row.iloc[col_idx]):
+                                    yield_rate = float(row.iloc[col_idx])
+                                    
+                                    yield_data.append({
+                                        'date': obs_date,
+                                        'maturity': maturity,
+                                        'yield_rate': yield_rate
+                                    })
+                                    
+                            except (ValueError, IndexError) as e:
+                                self.logger.debug(f"Skipping {maturity} yield for {date_str}: {str(e)}")
+                                continue
+                        
+                    except (ValueError, TypeError) as e:
+                        self.logger.debug(f"Skipping invalid date row: {str(e)}")
+                        continue
+                        
+            except Exception as parse_error:
+                self.logger.error(f"Failed to parse CSV data for gilt yields: {str(parse_error)}")
+                return []
+            
+            self.logger.info(f"Retrieved {len(yield_data)} gilt yield observations across all maturities")
+            return yield_data
+            
+        except Exception as e:
+            self.logger.error(f"Failed to fetch UK gilt yields: {str(e)}")
+            return []
 
 def collect_cpi(database_url=None):
     """Collect Consumer Price Index data with incremental updates."""
@@ -1720,352 +1460,66 @@ def collect_uk_daily_bank_rate(database_url=None):
         collector.logger.info("No valid UK Daily Bank Rate data to process")
         return 0
 
-
-class BoEYieldCurveCollector(BaseCollector):
-    """Collector for comprehensive Bank of England yield curve data from ZIP files."""
+def collect_uk_gilt_yields(database_url=None):
+    """Collect UK gilt yields (5Y, 10Y, 20Y) data with incremental updates using Bank of England IADB."""
+    from datetime import timedelta
     
-    def __init__(self, database_url=None):
-        super().__init__(database_url)
-        self.base_url = "https://www.bankofengland.co.uk/-/media/boe/files/statistics/yield-curves"
-        
-        # Available data sources
-        self.data_sources = {
-            'nominal': {
-                'current': 'latest-yield-curve-data.zip',
-                'historical': 'glcnominalddata.zip',
-                'file_prefix': 'GLC Nominal daily data',
-                'sheet': '4. spot curve'
-            },
-            'real': {
-                'current': 'latest-yield-curve-data.zip',
-                'historical': 'glcrealddata.zip',
-                'file_prefix': 'GLC Real daily data',
-                'sheet': '4. spot curve'
-            },
-            'inflation': {
-                'current': 'latest-yield-curve-data.zip', 
-                'historical': 'glcinflationddata.zip',
-                'file_prefix': 'GLC Inflation daily data',
-                'sheet': '4. spot curve'
-            },
-            'ois': {
-                'current': 'latest-yield-curve-data.zip',
-                'historical': 'oisddata.zip',
-                'file_prefix': 'OIS daily data',
-                'sheet': '4. spot curve'
-            }
-        }
+    collector = BankOfEnglandCollector(database_url)
     
-    def parse_yield_data(self, filename, yield_type):
-        """Parse Bank of England yield curve data from Excel files.
-        
-        Automatically finds the worksheet containing 'spot curve' in its name,
-        which works across all historical files regardless of exact naming.
-        """
-        import pandas as pd
-        from datetime import datetime
-        import openpyxl
-        
-        try:
-            # Find the worksheet containing "spot curve" in its name
-            wb = openpyxl.load_workbook(filename, read_only=True)
-            spot_curve_sheet = None
-            
-            for sheet_name in wb.sheetnames:
-                if "spot curve" in sheet_name.lower():
-                    spot_curve_sheet = sheet_name
-                    break
-            
-            wb.close()
-            
-            if not spot_curve_sheet:
-                raise ValueError(f"No worksheet containing 'spot curve' found in {filename}")
-            
-            # Read the correct worksheet
-            df = pd.read_excel(filename, sheet_name=spot_curve_sheet)
-            
-            # Get maturities from row 2 (skip first column)
-            maturities = df.iloc[2, 1:].values
-            maturities = [float(m) for m in maturities if pd.notna(m)]
-            
-            # Get data rows (skip first 3 rows which are headers)
-            data_rows = df.iloc[3:]
-            
-            # Process each data row
-            parsed_data = []
-            for _, row in data_rows.iterrows():
-                date_val = row.iloc[0]
-                
-                # Skip rows without dates
-                if pd.isna(date_val) or not isinstance(date_val, datetime):
-                    continue
-                    
-                # Get yield values (skip first column which is date, and handle potential empty second column)
-                start_col = 2 if pd.isna(row.iloc[1]) else 1
-                yield_values = row.iloc[start_col:start_col+len(maturities)].values
-                
-                # Create records for each maturity
-                for i, (maturity, yield_val) in enumerate(zip(maturities, yield_values)):
-                    if pd.notna(yield_val) and float(yield_val) > 0:  # Filter out zero/negative yields
-                        parsed_data.append({
-                            'date': date_val.date(),
-                            'maturity_years': float(maturity),
-                            'yield_rate': float(yield_val),
-                            'yield_type': yield_type
-                        })
-            
-            return parsed_data
-            
-        except Exception as e:
-            self.logger.error(f"Error parsing yield data from {filename}: {str(e)}")
-            return []
+    # Get date range for collection
+    start_date, end_date = collector.get_date_range_for_collection(
+        table="uk_gilt_yields"
+    )
     
-    def download_and_extract_zip(self, zip_filename, temp_dir='./temp_yield_data'):
-        """Download and extract BoE yield curve ZIP file."""
-        import requests
-        import zipfile
-        import os
-        import tempfile
-        
-        try:
-            # Create temp directory
-            os.makedirs(temp_dir, exist_ok=True)
-            
-            # Download ZIP file with browser-like headers to bypass anti-bot detection
-            url = f"{self.base_url}/{zip_filename}"
-            self.logger.info(f"Downloading yield curve data from {url}")
-            
-            # Add realistic browser headers to avoid 403 Forbidden errors
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.9',
-                'Accept-Encoding': 'gzip, deflate, br',
-                'Connection': 'keep-alive',
-                'Upgrade-Insecure-Requests': '1',
-                'Sec-Fetch-Dest': 'document',
-                'Sec-Fetch-Mode': 'navigate',
-                'Sec-Fetch-Site': 'none',
-                'Cache-Control': 'max-age=0'
-            }
-            
-            response = requests.get(url, headers=headers, stream=True, timeout=60)
-            response.raise_for_status()
-            
-            zip_path = os.path.join(temp_dir, zip_filename)
-            with open(zip_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
-            
-            # Extract ZIP file
-            extracted_files = []
-            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                for file_info in zip_ref.filelist:
-                    if file_info.filename.endswith('.xlsx'):
-                        extracted_path = zip_ref.extract(file_info, temp_dir)
-                        extracted_files.append(extracted_path)
-            
-            # Clean up ZIP file
-            os.remove(zip_path)
-            
-            return extracted_files
-            
-        except Exception as e:
-            self.logger.error(f"Error downloading/extracting {zip_filename}: {str(e)}")
-            return []
-    
-    def store_yield_data(self, data_records):
-        """Store yield curve data in database."""
-        if not data_records:
-            return 0
-        
-        # Prepare data for bulk upsert
-        bulk_data = []
-        for record in data_records:
-            bulk_data.append({
-                "date": record["date"],
-                "maturity_years": record["maturity_years"], 
-                "yield_rate": record["yield_rate"],
-                "yield_type": record["yield_type"]
-            })
-        
-        # Sort by date and maturity for consistency
-        bulk_data.sort(key=lambda x: (x["date"], x["maturity_years"]))
-        
-        # Bulk upsert all records
-        if bulk_data:
-            success_count = self.bulk_upsert_data("boe_yield_curves", bulk_data,
-                                                 conflict_columns=['date', 'maturity_years', 'yield_type'])
-            return success_count
-        
+    if start_date is None and end_date is None:
+        collector.logger.info("UK gilt yields data is already up to date")
         return 0
     
-    def get_yield_type_date_range(self, yield_type):
-        """Get date range for collection for a specific yield type."""
-        from datetime import datetime
+    # Convert dates to BoE format (DD/MMM/YYYY)
+    if start_date is None:
+        # Get all available historical data - gilt yields available from 1970
+        start_date_str = "01/Jan/1970"  # Start from earliest available gilt yields data
+    else:
+        start_date_str = start_date.strftime("%d/%b/%Y")
         
-        end_date = datetime.now().date()
-        
-        if self.database_url is None:
-            # Safe mode - always return None to collect all historical data
-            return None, end_date
-        
+    end_date_str = end_date.strftime("%d/%b/%Y")
+    
+    # Fetch gilt yields data
+    gilt_data = collector.get_uk_gilt_yields(start_date_str, end_date_str)
+    
+    if not gilt_data:
+        collector.logger.info("No UK gilt yields data retrieved from Bank of England")
+        return 0
+    
+    # Filter data within target date range
+    bulk_data = []
+    for item in gilt_data:
         try:
-            import psycopg2
-            conn = psycopg2.connect(self.database_url)
-            cursor = conn.cursor()
+            obs_date = item["date"]
             
-            # Check for existing data for this specific yield type
-            cursor.execute("""
-                SELECT MAX(date) FROM boe_yield_curves 
-                WHERE yield_type = %s
-            """, (yield_type,))
-            
-            result = cursor.fetchone()
-            cursor.close()
-            conn.close()
-            
-            if result and result[0]:
-                # Data exists for this yield type, collect from next day
-                from datetime import timedelta
-                start_date = result[0] + timedelta(days=1)
-                self.logger.info(f"Fetching incremental data for boe_yield_curves from {start_date} to {end_date}")
-                return start_date, end_date
-            else:
-                # No data exists for this yield type - collect all historical data
-                self.logger.info(f"No existing data in boe_yield_curves, fetching all available historical data")
-                return None, end_date
+            # Only process data within our target date range
+            if (start_date and obs_date < start_date) or obs_date > end_date:
+                continue
                 
-        except Exception as e:
-            self.logger.warning(f"Could not check existing data for {yield_type}: {e}")
-            # Fallback to collecting recent data only
-            from datetime import timedelta
-            start_date = end_date - timedelta(days=365)
-            return start_date, end_date
-
-    def collect_all_yield_types(self, yield_types, include_historical=True):
-        """
-        Collect all yield types by downloading shared ZIP files once and processing all yield types.
-        This prevents downloading the same latest-yield-curve-data.zip file multiple times.
-        """
-        import tempfile
-        import os
-        import shutil
-        
-        total_records = 0
-        temp_dir = tempfile.mkdtemp(prefix='boe_yield_optimized_')
-        
-        try:
-            self.logger.info("🚀 Starting BoE yield curve collection")
-            
-            # Step 1 & 2: Download and extract latest ZIP file once (contains all yield types)
-            latest_zip_name = 'latest-yield-curve-data.zip'
-            
-            self.logger.info(f"Downloading and extracting latest ZIP file once for all yield types: {latest_zip_name}")
-            latest_files = self.download_and_extract_zip(latest_zip_name, temp_dir)
-            
-            # Step 3: Process each yield type from the same extracted files
-            for yield_type in yield_types:
-                self.logger.info(f"Processing {yield_type} yield curves from shared ZIP")
-                
-                if yield_type not in self.data_sources:
-                    self.logger.warning(f"Unknown yield type: {yield_type}")
-                    continue
-                
-                source_config = self.data_sources[yield_type]
-                
-                # Find files for this yield type in the extracted files
-                latest_data = []
-                for file_path in latest_files:
-                    filename = os.path.basename(file_path)
-                    if source_config['file_prefix'] in filename and 'current month' in filename:
-                        self.logger.info(f"Processing latest file: {filename}")
-                        data = self.parse_yield_data(file_path, yield_type)
-                        if data:
-                            latest_data.extend(data)
-                            self.logger.info(f"Extracted {len(data)} {yield_type} records from {filename}")
-                
-                # Step 4: Determine date range and check if historical data needed (yield type specific)
-                start_date, end_date = self.get_yield_type_date_range(yield_type)
-                
-                # Step 5: Handle historical data if needed (yield type specific)
-                # Collect historical data if: 1) empty database (start_date=None), or 2) gap detected
-                if include_historical and latest_data and (start_date is None or start_date):
-                    # Check if latest data covers the gap
-                    data_start = min(d['date'] for d in latest_data)
-                    
-                    # Determine if we should collect historical data
-                    should_collect_historical = False
-                    if start_date is None:
-                        # Empty database - collect all historical data (safe mode or production)
-                        should_collect_historical = True
-                        mode = "safe mode" if self.database_url is None else "production"
-                        self.logger.info(f"Empty database ({mode}): collecting all historical data for {yield_type}")
-                    elif start_date and data_start > start_date:
-                        gap_days = (data_start - start_date).days
-                        should_collect_historical = True
-                        self.logger.info(f"Gap detected for {yield_type}: {gap_days} days, downloading historical data")
-                    
-                    if should_collect_historical:
-                        # Download and extract historical ZIP for this specific yield type
-                        historical_zip_name = source_config['historical']
-                        historical_temp_dir = os.path.join(temp_dir, f'{yield_type}_historical')
-                        
-                        try:
-                            historical_files = self.download_and_extract_zip(historical_zip_name, historical_temp_dir)
-                            
-                            # Process historical files for gap filling
-                            for file_path in historical_files:
-                                filename = os.path.basename(file_path)
-                                if source_config['file_prefix'] in filename and 'current month' not in filename:
-                                    data = self.parse_yield_data(file_path, yield_type)
-                                    if data:
-                                        # Filter historical data based on scenario
-                                        if start_date is None:  # Empty database - collect all historical data
-                                            gap_data = [d for d in data if d['date'] < data_start]
-                                        else:  # Incremental update - only collect gap data
-                                            gap_data = [d for d in data if start_date <= d['date'] < data_start]
-                                        if gap_data:
-                                            latest_data.extend(gap_data)
-                                            self.logger.info(f"Added {len(gap_data)} historical {yield_type} records")
-                        except Exception as e:
-                            self.logger.warning(f"Could not download historical data for {yield_type}: {str(e)}")
-                
-                # Step 6: Store data for this yield type
-                if latest_data:
-                    count = self.store_yield_data(latest_data)
-                    total_records += count
-                    self.logger.info(f"Stored {count} {yield_type} yield curve records")
-                else:
-                    self.logger.info(f"No {yield_type} data to store")
-            
-            self.logger.info(f"✅ Optimized collection completed: {total_records} total records")
-            return total_records
+            data = {
+                "date": obs_date,
+                "maturity": item["maturity"],
+                "yield_rate": item["yield_rate"]
+            }
+            bulk_data.append(data)
             
         except Exception as e:
-            self.logger.error(f"Error in optimized collection: {str(e)}")
-            raise
-        finally:
-            # Clean up temp directory
-            if os.path.exists(temp_dir):
-                shutil.rmtree(temp_dir)
+            collector.logger.error(f"Error processing gilt yield data for {item.get('date', 'unknown')}: {str(e)}")
     
-
-def collect_boe_yield_curves(database_url=None, yield_types=['nominal', 'real', 'inflation', 'ois'], include_historical=True):
-    """Collect comprehensive Bank of England yield curve data from ZIP files."""
-    collector = BoEYieldCurveCollector(database_url)
-    total_records = 0
+    # Sort by date and maturity for consistency
+    bulk_data.sort(key=lambda x: (x["date"], x["maturity"]))
     
-    # Download shared ZIP files once and process all yield types
-    # The latest-yield-curve-data.zip contains all 4 yield types, so we download it once
-    collector.logger.info(f"Starting BoE yield curve collection for {len(yield_types)} yield types: {yield_types}")
-    
-    try:
-        # Download and process shared latest ZIP file once - no fallback
-        total_records += collector.collect_all_yield_types(yield_types, include_historical)
-    except Exception as e:
-        collector.logger.error(f"BoE yield curve collection failed: {str(e)}")
-        raise Exception(f"BoE yield curve collection failed: {str(e)}")
-    
-    collector.logger.info(f"Total BoE yield curve records collected: {total_records}")
-    return total_records
+    # Bulk upsert all records
+    if bulk_data:
+        success_count = collector.bulk_upsert_data("uk_gilt_yields", bulk_data, 
+                                                 conflict_columns=['date', 'maturity'])
+        collector.logger.info(f"Successfully bulk upserted {success_count} UK gilt yield records")
+        return success_count
+    else:
+        collector.logger.info("No valid UK gilt yields data to process")
+        return 0
