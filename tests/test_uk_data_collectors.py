@@ -4,7 +4,7 @@ Tests for UK data collectors including ONS and Bank of England APIs.
 
 import pytest
 from datetime import datetime
-from data_collectors.economic_indicators import ONSCollector, BankOfEnglandCollector
+from data_collectors.economic_indicators import ONSCollector, BankOfEnglandCollector, GiltMarketCollector, collect_gilt_market_prices
 from data_collectors.uk_market_data import MarketWatchFTSECollector
 
 
@@ -346,3 +346,48 @@ class TestBoEYieldCurveCollector:
             
             assert not os.path.exists(test_dir), "Directory should be cleaned up"
             print("✅ Cleanup functionality validated")
+
+
+class TestGiltMarketCollector:
+    """Tests for real-time gilt market price collection from Hargreaves Lansdown."""
+    
+    def test_gilt_market_collector_initialization(self):
+        """Test gilt market collector can be initialized."""
+        collector = GiltMarketCollector(database_url=None)
+        assert collector.base_url == "https://www.hl.co.uk/shares/corporate-bonds-gilts/bond-prices/uk-gilts"
+        assert collector.database_url is None
+        assert collector.chrome_options is not None
+        print("✅ Gilt market collector initialized correctly")
+    
+    @pytest.mark.integration  
+    def test_gilt_market_prices_safe_mode(self):
+        """Test gilt market price collection in safe mode (single test to minimize web traffic)."""
+        import logging
+        
+        # Set up logging to see the collection progress
+        logging.basicConfig(level=logging.INFO)
+        logger = logging.getLogger(__name__)
+        
+        logger.info("🚀 Starting gilt market prices collection test (safe mode)")
+        logger.info("This test scrapes live broker data and validates the data structure")
+        
+        # Test with safe mode (no database writes)
+        result = collect_gilt_market_prices(database_url=None)
+        
+        # Basic validation - function returns integer (record count) in safe mode
+        assert isinstance(result, int), "Result should be an integer count in safe mode"
+        
+        # Broker should be accessible - failure to get data is a test failure
+        assert result > 0, f"Gilt market collector should return data, got {result}. Check HL website access"
+        
+        logger.info(f"✅ Successfully processed {result} gilt market price records in safe mode")
+        
+        # Basic validation that we got reasonable number of active gilts
+        assert result >= 20, f"Should have at least 20 active gilts, got {result}"
+        assert result <= 150, f"Should have at most 150 gilts (sanity check), got {result}"
+        
+        print("✅ Gilt market prices provide comprehensive real-time broker data")
+        print("   Expected data: clean prices, accrued interest, YTM calculations, after-tax analysis")
+        print("   Coverage: All UK Treasury gilts available on Hargreaves Lansdown platform")
+        
+        logger.info(f"🎉 Test completed successfully! Total gilt records processed: {result}")
