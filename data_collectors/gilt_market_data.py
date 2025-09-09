@@ -5,9 +5,12 @@ This module requires additional dependencies:
 - scipy>=1.11.0 (for YTM calculations)
 - selenium>=4.15.0 (for web scraping) 
 - webdriver-manager>=4.0.0 (for Chrome driver management)
+
+Note: On ARM64 architectures, Chrome/ChromeDriver compatibility may be limited.
 """
 import time
 import re
+import platform
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 from scipy.optimize import fsolve
@@ -15,7 +18,11 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
+import os
+try:
+    from webdriver_manager.chrome import ChromeDriverManager
+except ImportError:
+    ChromeDriverManager = None
 from .base import BaseCollector
 
 
@@ -31,13 +38,52 @@ class GiltMarketCollector(BaseCollector):
         self.chrome_options = self._setup_chrome_options()
     
     def _setup_chrome_options(self):
-        """Configure Chrome options for headless scraping."""
+        """Configure Chrome options for Pi-friendly headless scraping."""
         options = Options()
         options.add_argument("--headless")
-        options.add_argument("--no-sandbox")
+        options.add_argument("--no-sandbox") 
         options.add_argument("--disable-dev-shm-usage")
-        options.add_argument("--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+        options.add_argument("--disable-gpu")
+        options.add_argument("--remote-debugging-port=9222")
         return options
+    
+    def _get_chrome_service(self):
+        """Get Chrome service for both Pi and development environments."""
+        arch = platform.machine().lower()
+        system = platform.system()
+        
+        # Try Pi-specific path first (ARM64 Linux)
+        if arch in ['aarch64', 'arm64'] and system == 'Linux':
+            pi_chromedriver_path = '/usr/lib/chromium-browser/chromedriver'
+            if os.path.exists(pi_chromedriver_path):
+                self.logger.info("Using Pi ChromeDriver from chromium-chromedriver package")
+                return Service(pi_chromedriver_path)
+        
+        # Fallback to webdriver-manager for development environments
+        if ChromeDriverManager is not None:
+            try:
+                self.logger.info("Using ChromeDriver from webdriver-manager (development environment)")
+                return Service(ChromeDriverManager().install())
+            except Exception as e:
+                self.logger.warning(f"webdriver-manager failed: {e}")
+        
+        # Final fallback - check common system paths
+        common_paths = [
+            '/usr/bin/chromedriver',
+            '/usr/local/bin/chromedriver',
+            '/opt/homebrew/bin/chromedriver',  # macOS with Homebrew
+        ]
+        
+        for path in common_paths:
+            if os.path.exists(path):
+                self.logger.info(f"Using system ChromeDriver at: {path}")
+                return Service(path)
+        
+        # No ChromeDriver found
+        if arch in ['aarch64', 'arm64'] and system == 'Linux':
+            raise RuntimeError("ChromeDriver not found - install with: apt install chromium-chromedriver")
+        else:
+            raise RuntimeError("ChromeDriver not found - install via webdriver-manager or system package manager")
     
     def calculate_accrued_interest(self, face_value: float, coupon_rate: float, 
                                  last_coupon_date: datetime, settlement_date: datetime, 
@@ -196,7 +242,18 @@ class GiltMarketCollector(BaseCollector):
         """Scrape UK Gilts and calculate YTM based on clean prices."""
         driver = None
         try:
-            service = Service(ChromeDriverManager().install())
+            return self._scrape_with_selenium()
+        except Exception as e:
+            self.logger.error(f"Selenium scraping failed: {str(e)}")
+            # Fallback: Return empty list for now, could implement requests-based scraping
+            self.logger.info("Falling back to empty dataset - browser automation not available")
+            return []
+    
+    def _scrape_with_selenium(self) -> List[Dict[str, Any]]:
+        """Scrape using Selenium WebDriver."""
+        driver = None
+        try:
+            service = self._get_chrome_service()
             driver = webdriver.Chrome(service=service, options=self.chrome_options)
             driver.get(self.base_url)
             
