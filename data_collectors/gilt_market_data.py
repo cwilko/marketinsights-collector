@@ -440,17 +440,17 @@ def collect_gilt_market_prices(database_url=None):
         bulk_data = []
         for gilt in gilt_data:
             try:
-                # Convert to database format
+                # Convert to database format (ensure NumPy types are converted to Python types)
                 data = {
-                    'bond_name': gilt['bond_name'],
-                    'clean_price': gilt['clean_price'],
-                    'accrued_interest': gilt['accrued_interest'],
-                    'dirty_price': gilt['dirty_price'], 
-                    'coupon_rate': gilt['coupon_rate'],
+                    'bond_name': str(gilt['bond_name']) if gilt['bond_name'] is not None else None,
+                    'clean_price': float(gilt['clean_price']) if gilt['clean_price'] is not None else None,
+                    'accrued_interest': float(gilt['accrued_interest']) if gilt['accrued_interest'] is not None else None,
+                    'dirty_price': float(gilt['dirty_price']) if gilt['dirty_price'] is not None else None,
+                    'coupon_rate': float(gilt['coupon_rate']) if gilt['coupon_rate'] is not None else None,
                     'maturity_date': gilt['maturity_date'].date(),
-                    'years_to_maturity': gilt['years_to_maturity'],
-                    'ytm': gilt['ytm'],
-                    'after_tax_ytm': gilt['after_tax_ytm'],
+                    'years_to_maturity': float(gilt['years_to_maturity']) if gilt['years_to_maturity'] is not None else None,
+                    'ytm': float(gilt['ytm']) if gilt['ytm'] is not None else None,
+                    'after_tax_ytm': float(gilt['after_tax_ytm']) if gilt['after_tax_ytm'] is not None else None,
                     'scraped_at': gilt['scraped_at']
                 }
                 bulk_data.append(data)
