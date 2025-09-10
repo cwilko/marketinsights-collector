@@ -56,20 +56,24 @@ class GiltMarketCollector(BaseCollector):
         if arch in ['aarch64', 'arm64'] and system == 'Linux':
             # Check shared volume locations (init container installation)
             shared_paths = [
+                '/shared/usr/bin/chromedriver',  # Most likely location from chromium-driver package
                 '/shared/usr/lib/chromium-browser/chromedriver',
-                '/shared/usr/bin/chromedriver', 
                 '/shared/snap/chromium/current/usr/lib/chromium-browser/chromedriver'
             ]
             
             for path in shared_paths:
                 if os.path.exists(path):
                     self.logger.info(f"Using Pi ChromeDriver from init container: {path}")
+                    # Also set chromium binary location if available
+                    if os.path.exists('/shared/usr/bin/chromium'):
+                        self.chrome_options.binary_location = '/shared/usr/bin/chromium'
+                        self.logger.info("Using Chromium binary from shared volume")
                     return Service(path)
             
             # Fallback to system paths
             system_paths = [
+                '/usr/bin/chromedriver',  # Most likely system location
                 '/usr/lib/chromium-browser/chromedriver',
-                '/usr/bin/chromedriver',
                 '/snap/chromium/current/usr/lib/chromium-browser/chromedriver'
             ]
             
