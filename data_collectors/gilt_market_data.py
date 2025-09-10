@@ -393,8 +393,15 @@ class GiltMarketCollector(BaseCollector):
                         # Calculate after-tax YTM (30% tax on coupons, no tax on capital gains)
                         after_tax_ytm = self.calculate_after_tax_ytm(dirty_price, 100.0, coupon_rate, years_to_maturity, 0.30)
                         
+                        # Create unique bond name for Treasury Strips and other duplicates
+                        unique_bond_name = bond_name.split('\n')[0]  # Take first line
+                        if 'treasury strip' in unique_bond_name.lower():
+                            # For Treasury Strips, include maturity date to make unique
+                            maturity_str = maturity_date.strftime('%b-%Y')
+                            unique_bond_name = f"{unique_bond_name} {maturity_str}"
+                        
                         bonds.append({
-                            'bond_name': bond_name.split('\n')[0],  # Take first line
+                            'bond_name': unique_bond_name,
                             'clean_price': clean_price,
                             'accrued_interest': accrued_interest,
                             'dirty_price': dirty_price,
@@ -403,7 +410,7 @@ class GiltMarketCollector(BaseCollector):
                             'years_to_maturity': years_to_maturity,
                             'ytm': ytm,
                             'after_tax_ytm': after_tax_ytm,
-                            'scraped_at': settlement_date
+                            'scraped_date': settlement_date.date()
                         })
                         
                     except Exception as e:
@@ -451,7 +458,7 @@ def collect_gilt_market_prices(database_url=None):
                     'years_to_maturity': float(gilt['years_to_maturity']) if gilt['years_to_maturity'] is not None else None,
                     'ytm': float(gilt['ytm']) if gilt['ytm'] is not None else None,
                     'after_tax_ytm': float(gilt['after_tax_ytm']) if gilt['after_tax_ytm'] is not None else None,
-                    'scraped_at': gilt['scraped_at']
+                    'scraped_date': gilt['scraped_date']
                 }
                 bulk_data.append(data)
                 
@@ -464,7 +471,7 @@ def collect_gilt_market_prices(database_url=None):
             success_count = collector.bulk_upsert_data(
                 "gilt_market_prices", 
                 bulk_data,
-                conflict_columns=['bond_name', 'scraped_at']
+                conflict_columns=['bond_name', 'scraped_date']
             )
             if success_count == 0:
                 raise RuntimeError(f"Database upsert failed - no records were successfully stored despite having {len(bulk_data)} records to process")
