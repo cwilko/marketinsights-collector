@@ -240,14 +240,22 @@ class GiltMarketCollector(BaseCollector):
     
     def scrape_gilt_prices(self) -> List[Dict[str, Any]]:
         """Scrape UK Gilts and calculate YTM based on clean prices."""
-        driver = None
+        arch = platform.machine().lower()
+        system = platform.system()
+        
         try:
             return self._scrape_with_selenium()
         except Exception as e:
-            self.logger.error(f"Selenium scraping failed: {str(e)}")
-            # Fallback: Return empty list for now, could implement requests-based scraping
-            self.logger.info("Falling back to empty dataset - browser automation not available")
-            return []
+            # On ARM64 Linux (Pi), fail hard - don't fall back gracefully
+            if arch in ['aarch64', 'arm64'] and system == 'Linux':
+                self.logger.error(f"CRITICAL: Selenium scraping failed on ARM64 Linux: {str(e)}")
+                self.logger.error("Expected chromium-chromedriver to be installed via apt-get")
+                raise RuntimeError(f"ARM64 gilt market scraping failed: {e}") from e
+            else:
+                # On development environments, fall back gracefully
+                self.logger.error(f"Selenium scraping failed: {str(e)}")
+                self.logger.info("Falling back to empty dataset - browser automation not available")
+                return []
     
     def _scrape_with_selenium(self) -> List[Dict[str, Any]]:
         """Scrape using Selenium WebDriver."""
