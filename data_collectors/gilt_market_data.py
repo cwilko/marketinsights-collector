@@ -64,6 +64,25 @@ class GiltMarketCollector(BaseCollector):
             for path in shared_paths:
                 if os.path.exists(path):
                     self.logger.info(f"Using Pi ChromeDriver from init container: {path}")
+                    
+                    # Set library path for copied shared libraries
+                    current_ld_path = os.environ.get('LD_LIBRARY_PATH', '')
+                    shared_lib_paths = [
+                        '/shared/lib/aarch64-linux-gnu',
+                        '/shared/usr/lib/aarch64-linux-gnu', 
+                        '/shared/usr/lib',
+                        '/shared/lib'
+                    ]
+                    # Only add paths that exist
+                    existing_paths = [p for p in shared_lib_paths if os.path.exists(p)]
+                    if existing_paths:
+                        new_ld_path = ':'.join(existing_paths)
+                        if current_ld_path:
+                            os.environ['LD_LIBRARY_PATH'] = f"{new_ld_path}:{current_ld_path}"
+                        else:
+                            os.environ['LD_LIBRARY_PATH'] = new_ld_path
+                        self.logger.info(f"Set LD_LIBRARY_PATH: {os.environ['LD_LIBRARY_PATH']}")
+                    
                     # Also set chromium binary location if available
                     if os.path.exists('/shared/usr/bin/chromium'):
                         self.chrome_options.binary_location = '/shared/usr/bin/chromium'
