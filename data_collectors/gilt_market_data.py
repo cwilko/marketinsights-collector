@@ -54,17 +54,29 @@ class GiltMarketCollector(BaseCollector):
         
         # Try Pi-specific paths first (ARM64 Linux)
         if arch in ['aarch64', 'arm64'] and system == 'Linux':
-            # Check shared volume first (init container installation)
-            shared_chromedriver_path = '/shared/usr/lib/chromium-browser/chromedriver'
-            if os.path.exists(shared_chromedriver_path):
-                self.logger.info("Using Pi ChromeDriver from init container (shared volume)")
-                return Service(shared_chromedriver_path)
+            # Check shared volume locations (init container installation)
+            shared_paths = [
+                '/shared/usr/lib/chromium-browser/chromedriver',
+                '/shared/usr/bin/chromedriver', 
+                '/shared/snap/chromium/current/usr/lib/chromium-browser/chromedriver'
+            ]
             
-            # Fallback to system path
-            pi_chromedriver_path = '/usr/lib/chromium-browser/chromedriver'
-            if os.path.exists(pi_chromedriver_path):
-                self.logger.info("Using Pi ChromeDriver from system installation")
-                return Service(pi_chromedriver_path)
+            for path in shared_paths:
+                if os.path.exists(path):
+                    self.logger.info(f"Using Pi ChromeDriver from init container: {path}")
+                    return Service(path)
+            
+            # Fallback to system paths
+            system_paths = [
+                '/usr/lib/chromium-browser/chromedriver',
+                '/usr/bin/chromedriver',
+                '/snap/chromium/current/usr/lib/chromium-browser/chromedriver'
+            ]
+            
+            for path in system_paths:
+                if os.path.exists(path):
+                    self.logger.info(f"Using Pi ChromeDriver from system: {path}")
+                    return Service(path)
         
         # Fallback to webdriver-manager for development environments
         if ChromeDriverManager is not None:
