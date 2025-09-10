@@ -466,6 +466,8 @@ def collect_gilt_market_prices(database_url=None):
                 bulk_data,
                 conflict_columns=['bond_name', 'scraped_at']
             )
+            if success_count == 0:
+                raise RuntimeError(f"Database upsert failed - no records were successfully stored despite having {len(bulk_data)} records to process")
             collector.logger.info(f"Successfully stored {success_count} gilt market price records")
             return success_count
         else:
