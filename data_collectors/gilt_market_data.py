@@ -272,7 +272,7 @@ class GiltMarketCollector(BaseCollector):
             # On ARM64 Linux (Pi), fail hard - don't fall back gracefully
             if arch in ['aarch64', 'arm64'] and system == 'Linux':
                 self.logger.error(f"CRITICAL: Selenium scraping failed on ARM64 Linux: {str(e)}")
-                self.logger.error("Expected chromium-chromedriver to be installed via apt-get")
+                self.logger.error("ChromeDriver/Chromium should be installed by init container")
                 raise RuntimeError(f"ARM64 gilt market scraping failed: {e}") from e
             else:
                 # On development environments, fall back gracefully
@@ -455,4 +455,4 @@ def collect_gilt_market_prices(database_url=None):
             
     except Exception as e:
         collector.logger.error(f"Failed to collect gilt market prices: {str(e)}")
-        return 0
+        raise  # Re-raise the exception to fail the Airflow task
