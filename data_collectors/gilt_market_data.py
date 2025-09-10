@@ -52,11 +52,18 @@ class GiltMarketCollector(BaseCollector):
         arch = platform.machine().lower()
         system = platform.system()
         
-        # Try Pi-specific path first (ARM64 Linux)
+        # Try Pi-specific paths first (ARM64 Linux)
         if arch in ['aarch64', 'arm64'] and system == 'Linux':
+            # Check shared volume first (init container installation)
+            shared_chromedriver_path = '/shared/usr/lib/chromium-browser/chromedriver'
+            if os.path.exists(shared_chromedriver_path):
+                self.logger.info("Using Pi ChromeDriver from init container (shared volume)")
+                return Service(shared_chromedriver_path)
+            
+            # Fallback to system path
             pi_chromedriver_path = '/usr/lib/chromium-browser/chromedriver'
             if os.path.exists(pi_chromedriver_path):
-                self.logger.info("Using Pi ChromeDriver from chromium-chromedriver package")
+                self.logger.info("Using Pi ChromeDriver from system installation")
                 return Service(pi_chromedriver_path)
         
         # Fallback to webdriver-manager for development environments
