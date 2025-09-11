@@ -399,29 +399,18 @@ class TestUKSwapRatesCollector:
     """Tests for UK GBP Interest Rate Swap data collection via investiny."""
     
     @pytest.mark.integration
-    def test_uk_swap_rates_10y_safe_mode(self):
-        """Test UK swap rates collection for 10Y maturity only (minimal API calls, safe mode)."""
-        from data_collectors.uk_swap_rates import UKSwapRatesCollector
+    def test_uk_swap_rates_safe_mode(self):
+        """Test UK swap rates collection (same as DAG logic, safe mode)."""
+        from data_collectors.uk_swap_rates import collect_uk_swap_rates
         
-        collector = UKSwapRatesCollector(database_url=None)
+        # Call the same function the DAG calls, but in safe mode
+        result = collect_uk_swap_rates(database_url=None)
         
-        # Test only 10Y maturity to minimize API calls
-        records = collector.get_swap_data('10Y', start_date=None)
+        # Basic validation - should return record count
+        assert isinstance(result, int), "Result should be an integer count in safe mode"
+        assert result > 0, f"Should return swap data count, got {result}"
         
-        # Basic validation
-        assert isinstance(records, list), "Result should be a list of records"
-        assert len(records) > 0, f"Should return swap data, got {len(records)} records"
+        # Should have substantial data across all maturities
+        assert result >= 1000, f"Should have substantial historical data, got {result}"
         
-        # Validate data structure
-        sample_record = records[0]
-        required_fields = ['date', 'maturity', 'maturity_years', 'close_rate', 'source', 'symbol']
-        for field in required_fields:
-            assert field in sample_record, f"Record should have {field} field"
-        
-        # Validate key data values
-        assert sample_record['maturity'] == '10Y'
-        assert sample_record['maturity_years'] == 10.0
-        assert sample_record['source'] == 'investiny'
-        assert sample_record['symbol'] == 'GBPSB6L10Y='
-        
-        print(f"✅ UK 10Y swap rates: {len(records)} records processed (safe mode)")
+        print(f"✅ UK swap rates: {result} total records processed (safe mode - matches DAG logic)")

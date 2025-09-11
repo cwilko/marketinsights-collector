@@ -173,13 +173,12 @@ class UKSwapRatesCollector(BaseCollector):
         return all_records
 
 
-def collect_uk_swap_rates(database_url=None, start_date=None):
+def collect_uk_swap_rates(database_url=None):
     """
     Collect UK GBP Interest Rate Swap curves.
     
     Args:
         database_url: Database connection URL. If None, returns count without storing.
-        start_date: Start date for incremental collection. If None, gets full history.
         
     Returns:
         Number of records processed
@@ -187,12 +186,38 @@ def collect_uk_swap_rates(database_url=None, start_date=None):
     collector = UKSwapRatesCollector(database_url)
     
     try:
+        # Determine if this is initial load or incremental update
+        start_date = None
+        if database_url:
+            try:
+                # Check for existing data to determine collection strategy
+                import psycopg2
+                conn = psycopg2.connect(database_url)
+                cursor = conn.cursor()
+                cursor.execute("SELECT MAX(date) FROM uk_swap_rates LIMIT 1")
+                result = cursor.fetchone()
+                latest_date = result[0] if result else None
+                cursor.close()
+                conn.close()
+                
+                if latest_date is not None:
+                    # Incremental update - get data from day after latest date
+                    from datetime import timedelta
+                    start_date = latest_date + timedelta(days=1)
+                    collector.logger.info(f"Found existing data - collecting incrementally from {start_date}")
+                else:
+                    collector.logger.info("No existing data - collecting full history")
+                    
+            except Exception as e:
+                collector.logger.info(f"Could not check existing data ({e}) - collecting full history")
+                start_date = None
+        
         # Collect swap rate data
         swap_data = collector.collect_all_swap_rates(start_date)
         
         if not swap_data:
-            collector.logger.info("No UK swap rate data found")
-            return 0
+            collector.logger.error("No UK swap rate data found - this indicates API failure or connection issues")
+            raise RuntimeError("Failed to collect any UK swap rate data - check API connectivity and permissions")
         
         # Process and store data
         if database_url:
