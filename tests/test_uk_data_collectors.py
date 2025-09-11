@@ -191,7 +191,8 @@ class TestUKDataValidation:
             "uk_daily_bank_rate", 
             "ftse_100_index",
             "boe_yield_curves",
-            "gbp_usd_exchange_rate"
+            "gbp_usd_exchange_rate",
+            "uk_swap_rates"
         ]
         
         # All tables should have consistent naming
@@ -392,3 +393,35 @@ class TestGiltMarketCollector:
         print("   Coverage: All UK Treasury gilts available on Hargreaves Lansdown platform")
         
         logger.info(f"🎉 Test completed successfully! Total gilt records processed: {result}")
+
+
+class TestUKSwapRatesCollector:
+    """Tests for UK GBP Interest Rate Swap data collection via investiny."""
+    
+    @pytest.mark.integration
+    def test_uk_swap_rates_10y_safe_mode(self):
+        """Test UK swap rates collection for 10Y maturity only (minimal API calls, safe mode)."""
+        from data_collectors.uk_swap_rates import UKSwapRatesCollector
+        
+        collector = UKSwapRatesCollector(database_url=None)
+        
+        # Test only 10Y maturity to minimize API calls
+        records = collector.get_swap_data('10Y', start_date=None)
+        
+        # Basic validation
+        assert isinstance(records, list), "Result should be a list of records"
+        assert len(records) > 0, f"Should return swap data, got {len(records)} records"
+        
+        # Validate data structure
+        sample_record = records[0]
+        required_fields = ['date', 'maturity', 'maturity_years', 'close_rate', 'source', 'symbol']
+        for field in required_fields:
+            assert field in sample_record, f"Record should have {field} field"
+        
+        # Validate key data values
+        assert sample_record['maturity'] == '10Y'
+        assert sample_record['maturity_years'] == 10.0
+        assert sample_record['source'] == 'investiny'
+        assert sample_record['symbol'] == 'GBPSB6L10Y='
+        
+        print(f"✅ UK 10Y swap rates: {len(records)} records processed (safe mode)")

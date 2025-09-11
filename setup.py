@@ -18,6 +18,9 @@ setup(
             "selenium>=4.15.0",
             "webdriver-manager>=4.0.0",
         ],
+        "uk_swaps": [
+            "investiny>=0.7.2",
+        ],
     },
     python_requires=">=3.8",
     classifiers=[
