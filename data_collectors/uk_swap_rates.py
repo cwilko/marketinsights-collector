@@ -86,8 +86,9 @@ class UKSwapRatesCollector(BaseCollector):
                 self.logger.info(f"Fetching full history for {maturity} GBP swap rates from May 2018")
                 historical = historical_data(
                     investing_id=ticker_id,
-                    from_date='01/05/2018',  # Full history from May 2018
-                    to_date=datetime.now().strftime('%d/%m/%Y')
+                    from_date='05/01/2018',  # MM/DD/YYYY format - May 1, 2018
+                    to_date=datetime.now().strftime('%m/%d/%Y'),  # MM/DD/YYYY format
+                    interval='D'
                 )
             else:
                 # Get incremental data from start_date
@@ -95,8 +96,9 @@ class UKSwapRatesCollector(BaseCollector):
                 self.logger.info(f"Fetching {maturity} GBP swap rates from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
                 historical = historical_data(
                     investing_id=ticker_id,
-                    from_date=start_date.strftime('%d/%m/%Y'),
-                    to_date=end_date.strftime('%d/%m/%Y')
+                    from_date=start_date.strftime('%m/%d/%Y'),  # MM/DD/YYYY format
+                    to_date=end_date.strftime('%m/%d/%Y'),      # MM/DD/YYYY format
+                    interval='D'
                 )
             
             if not isinstance(historical, dict) or 'date' not in historical:
@@ -160,10 +162,16 @@ class UKSwapRatesCollector(BaseCollector):
         Returns:
             List of all swap rate records across all maturities
         """
+        import time
         all_records = []
         
-        for maturity in self.swap_symbols.keys():
+        for i, maturity in enumerate(self.swap_symbols.keys()):
             try:
+                # Add 5-second delay between requests to avoid rate limiting (except for first request)
+                if i > 0:
+                    self.logger.info(f"Waiting 5 seconds before fetching {maturity} data to avoid rate limiting...")
+                    time.sleep(5)
+                
                 records = self.get_swap_data(maturity, start_date)
                 all_records.extend(records)
             except Exception as e:

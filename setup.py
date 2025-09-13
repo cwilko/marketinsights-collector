@@ -19,7 +19,7 @@ setup(
             "webdriver-manager>=4.0.0",
         ],
         "uk_swaps": [
-            "investiny>=0.7.2",
+            "investiny @ git+https://github.com/cwilko/investiny.git@feature/curl-cffi-support",
         ],
     },
     python_requires=">=3.8",
