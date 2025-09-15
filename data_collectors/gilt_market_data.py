@@ -537,20 +537,27 @@ class IndexLinkedGiltCollector(GiltMarketCollector):
                     cells = row.find_elements(By.TAG_NAME, "td")
                     
                     if len(cells) < 5:
+                        self.logger.debug(f"Row {i}: Skipping row with only {len(cells)} cells (need 5+)")
                         continue
                     
                     # Extract bond data - index-linked gilt table structure
-                    bond_name_element = cells[0].find_element(By.TAG_NAME, "a")
-                    bond_name = bond_name_element.text.strip()
+                    try:
+                        bond_name_element = cells[0].find_element(By.TAG_NAME, "a")
+                        bond_name = bond_name_element.text.strip()
+                    except Exception as e:
+                        self.logger.debug(f"Row {i}: No bond name link found, skipping: {str(e)}")
+                        continue
                     
                     # Skip if not a Treasury bond
                     if 'Treasury' not in bond_name:
+                        self.logger.debug(f"Row {i}: Skipping non-Treasury bond: '{bond_name}'")
                         continue
                     
                     # Extract clean price from Price column (column 3)
                     clean_price_text = cells[3].text.strip() if len(cells) > 3 else ""
                     clean_price_match = re.search(r'([0-9]+\.?[0-9]*)', clean_price_text)
                     if not clean_price_match:
+                        self.logger.debug(f"Row {i}: No clean price found in '{clean_price_text}' for {bond_name}")
                         continue
                     
                     clean_price = float(clean_price_match.group(1))
@@ -560,26 +567,59 @@ class IndexLinkedGiltCollector(GiltMarketCollector):
                     coupon_text = cells[1].text.strip() if len(cells) > 1 else ""
                     coupon_match = re.search(r'([0-9]+\.?[0-9]*)', coupon_text)
                     if not coupon_match:
+                        self.logger.debug(f"Row {i}: No coupon rate found in '{coupon_text}' for {bond_name}")
                         continue
                     
                     coupon_rate = float(coupon_match.group(1)) / 100  # Convert percentage to decimal
                     
-                    # Parse maturity date from bond name
-                    maturity_match = re.search(r'(\d{4})', bond_name)
-                    if not maturity_match:
-                        continue
+                    # Parse maturity date from Maturity column (column 2) - more reliable than bond name
+                    maturity_text = cells[2].text.strip() if len(cells) > 2 else ""
+                    maturity_date = None
                     
-                    maturity_year = int(maturity_match.group(1))
-                    
-                    # Estimate maturity date (index-linked gilts often mature in March)
-                    try:
-                        maturity_date = datetime(maturity_year, 3, 22)  # Common IL gilt maturity date
-                    except ValueError:
+                    if maturity_text:
+                        try:
+                            # Try different common date formats from the Maturity column
+                            date_formats = [
+                                "%d %B %Y",      # "22 March 2026"
+                                "%d %b %Y",      # "22 Mar 2026" 
+                                "%B %d, %Y",     # "March 22, 2026"
+                                "%b %d, %Y",     # "Mar 22, 2026"
+                                "%d/%m/%Y",      # "22/03/2026"
+                                "%m/%d/%Y",      # "03/22/2026" (US format)
+                                "%Y-%m-%d",      # "2026-03-22" (ISO format)
+                                "%d-%m-%Y",      # "22-03-2026"
+                            ]
+                            
+                            for date_format in date_formats:
+                                try:
+                                    maturity_date = datetime.strptime(maturity_text, date_format)
+                                    self.logger.debug(f"Row {i}: Parsed maturity date '{maturity_text}' as {maturity_date.strftime('%Y-%m-%d')} for '{bond_name}'")
+                                    break
+                                except ValueError:
+                                    continue
+                            
+                            if maturity_date is None:
+                                # If no date format worked, try to extract just the year
+                                year_match = re.search(r'(\d{4})', maturity_text)
+                                if year_match:
+                                    maturity_year = int(year_match.group(1))
+                                    maturity_date = datetime(maturity_year, 3, 22)  # Default to March 22
+                                    self.logger.debug(f"Row {i}: Extracted year {maturity_year} from '{maturity_text}', using March 22 for '{bond_name}'")
+                                else:
+                                    self.logger.debug(f"Row {i}: Could not parse maturity date '{maturity_text}' for {bond_name}")
+                                    continue
+                                    
+                        except Exception as e:
+                            self.logger.debug(f"Row {i}: Error parsing maturity date '{maturity_text}' for {bond_name}: {str(e)}")
+                            continue
+                    else:
+                        self.logger.debug(f"Row {i}: No maturity date found in Maturity column for {bond_name}")
                         continue
                     
                     # Calculate years to maturity
                     years_to_maturity = (maturity_date - settlement_date).days / 365.25
                     if years_to_maturity <= 0:
+                        self.logger.debug(f"Row {i}: Bond already matured ({years_to_maturity:.2f} years) for {bond_name}")
                         continue
                     
                     # Coupon rate already parsed from Coupon (%) column above
@@ -634,10 +674,13 @@ class IndexLinkedGiltCollector(GiltMarketCollector):
                     })
                     
                 except Exception as e:
-                    self.logger.debug(f"Error processing index-linked bond row {i}: {str(e)}")
+                    self.logger.debug(f"Row {i}: Exception processing index-linked bond: {str(e)}")
                     continue
             
             self.logger.info(f"Successfully scraped {len(bonds)} index-linked gilt prices")
+            rows_processed = len(rows) - 1  # Exclude header
+            if rows_processed > len(bonds):
+                self.logger.info(f"Note: Found {rows_processed} data rows but only scraped {len(bonds)} bonds - {rows_processed - len(bonds)} rows were filtered out")
             return bonds
         
         except Exception as e:
