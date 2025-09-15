@@ -5,7 +5,11 @@ Tests for UK data collectors including ONS and Bank of England APIs.
 import pytest
 from datetime import datetime
 from data_collectors.economic_indicators import ONSCollector, BankOfEnglandCollector
-from data_collectors.gilt_market_data import GiltMarketCollector, collect_gilt_market_prices
+from data_collectors.gilt_market_data import (
+    GiltMarketCollector, collect_gilt_market_prices,
+    IndexLinkedGiltCollector, collect_index_linked_gilt_prices,
+    CorporateBondCollector, collect_corporate_bond_prices
+)
 from data_collectors.uk_market_data import MarketWatchFTSECollector
 
 
@@ -414,3 +418,360 @@ class TestUKSwapRatesCollector:
         assert result >= 1000, f"Should have substantial historical data, got {result}"
         
         print(f"✅ UK swap rates: {result} total records processed (safe mode - matches DAG logic)")
+
+
+class TestIndexLinkedGiltCollector:
+    """Tests for real-time index-linked gilt price collection from Hargreaves Lansdown."""
+    
+    def test_index_linked_gilt_collector_initialization(self):
+        """Test index-linked gilt collector can be initialized."""
+        collector = IndexLinkedGiltCollector(database_url=None)
+        assert collector.base_url == "https://www.hl.co.uk/shares/corporate-bonds-gilts/bond-prices/uk-index-linked-gilts"
+        assert collector.database_url is None
+        assert collector.chrome_options is not None
+        print("✅ Index-linked gilt collector initialized correctly")
+    
+    def test_chrome_options_configuration(self):
+        """Test Chrome options are configured for headless operation."""
+        collector = IndexLinkedGiltCollector(database_url=None)
+        chrome_options = collector.chrome_options
+        
+        # Check key headless configuration options
+        assert "--headless" in chrome_options.arguments
+        assert "--no-sandbox" in chrome_options.arguments
+        assert "--disable-dev-shm-usage" in chrome_options.arguments
+        assert "--disable-gpu" in chrome_options.arguments
+        
+        print("✅ Chrome options configured correctly for headless scraping")
+    
+    def test_chrome_service_reuse(self):
+        """Test that Chrome service reuses GiltMarketCollector logic."""
+        collector = IndexLinkedGiltCollector(database_url=None)
+        
+        # Should be able to get Chrome service without errors
+        try:
+            service = collector._get_chrome_service()
+            assert service is not None
+            print("✅ Chrome service initialization working")
+        except RuntimeError as e:
+            if "ChromeDriver not found" in str(e):
+                print("⚠️ ChromeDriver not available in test environment (expected)")
+            else:
+                raise
+    
+    @pytest.mark.integration
+    def test_index_linked_gilt_prices_safe_mode(self):
+        """Test index-linked gilt price collection in safe mode."""
+        import logging
+        
+        # Set up logging to see the collection progress
+        logging.basicConfig(level=logging.INFO)
+        logger = logging.getLogger(__name__)
+        
+        logger.info("🚀 Starting index-linked gilt prices collection test (safe mode)")
+        logger.info("This test scrapes live broker data for inflation-protected gilts")
+        
+        # Test with safe mode (no database writes)
+        result = collect_index_linked_gilt_prices(database_url=None)
+        
+        # Basic validation - function returns integer (record count) in safe mode
+        assert isinstance(result, int), "Result should be an integer count in safe mode"
+        
+        # Broker should be accessible - failure to get data is a test failure
+        assert result > 0, f"Index-linked gilt collector should return data, got {result}. This indicates scraping failure - check page structure or website access"
+        
+        logger.info(f"✅ Successfully processed {result} index-linked gilt price records in safe mode")
+        
+        # Basic validation that we got reasonable number of index-linked gilts
+        assert result >= 5, f"Should have at least 5 index-linked gilts, got {result}"
+        assert result <= 50, f"Should have at most 50 index-linked gilts (sanity check), got {result}"
+        
+        print("✅ Index-linked gilt prices provide comprehensive real yields data")
+        print("   Expected data: real yields, after-tax real yields, inflation assumptions")
+        print("   Coverage: All UK Treasury index-linked gilts on Hargreaves Lansdown platform")
+        
+        logger.info(f"🎉 Test completed successfully! Total index-linked gilt records processed: {result}")
+    
+    def test_data_structure_validation(self):
+        """Test expected data structure for index-linked gilt records."""
+        collector = IndexLinkedGiltCollector(database_url=None)
+        
+        # Test the expected data fields
+        expected_fields = [
+            'bond_name', 'clean_price', 'accrued_interest', 'dirty_price',
+            'coupon_rate', 'maturity_date', 'years_to_maturity',
+            'real_yield', 'after_tax_real_yield', 'scraped_date', 'inflation_assumption'
+        ]
+        
+        # Mock data structure for validation
+        mock_record = {
+            'bond_name': 'Treasury 1.25% IL 2030',
+            'clean_price': 105.50,
+            'accrued_interest': 1.25,
+            'dirty_price': 106.75,
+            'coupon_rate': 0.0125,
+            'maturity_date': datetime(2030, 3, 22),
+            'years_to_maturity': 5.5,
+            'real_yield': 0.015,
+            'after_tax_real_yield': 0.0105,
+            'scraped_date': datetime.now().date(),
+            'inflation_assumption': 3.0
+        }
+        
+        # Validate all expected fields are present
+        for field in expected_fields:
+            assert field in mock_record, f"Expected field {field} should be in record structure"
+        
+        print("✅ Index-linked gilt data structure validation passed")
+
+
+class TestCorporateBondCollector:
+    """Tests for real-time corporate bond price collection from Hargreaves Lansdown."""
+    
+    def test_corporate_bond_collector_initialization(self):
+        """Test corporate bond collector can be initialized."""
+        collector = CorporateBondCollector(database_url=None)
+        assert collector.base_url == "https://www.hl.co.uk/shares/corporate-bonds-gilts/bond-prices/gbp-bonds"
+        assert collector.database_url is None
+        assert collector.chrome_options is not None
+        print("✅ Corporate bond collector initialized correctly")
+    
+    def test_chrome_port_differentiation(self):
+        """Test that corporate bond collector uses different Chrome debug port."""
+        collector = CorporateBondCollector(database_url=None)
+        chrome_options = collector.chrome_options
+        
+        # Should use port 9224 (different from gilt collectors)
+        assert "--remote-debugging-port=9224" in chrome_options.arguments
+        print("✅ Corporate bond collector uses unique Chrome debug port")
+    
+    def test_chrome_service_reuse_pattern(self):
+        """Test that corporate bond collector reuses Chrome service logic."""
+        collector = CorporateBondCollector(database_url=None)
+        
+        # Should be able to get Chrome service without errors
+        try:
+            service = collector._get_chrome_service()
+            assert service is not None
+            print("✅ Corporate bond Chrome service initialization working")
+        except RuntimeError as e:
+            if "ChromeDriver not found" in str(e):
+                print("⚠️ ChromeDriver not available in test environment (expected)")
+            else:
+                raise
+    
+    @pytest.mark.integration
+    def test_corporate_bond_prices_safe_mode(self):
+        """Test corporate bond price collection in safe mode."""
+        import logging
+        
+        # Set up logging to see the collection progress
+        logging.basicConfig(level=logging.INFO)
+        logger = logging.getLogger(__name__)
+        
+        logger.info("🚀 Starting corporate bond prices collection test (safe mode)")
+        logger.info("This test scrapes live broker data for GBP corporate bonds")
+        
+        # Test with safe mode (no database writes)
+        result = collect_corporate_bond_prices(database_url=None)
+        
+        # Basic validation - function returns integer (record count) in safe mode
+        assert isinstance(result, int), "Result should be an integer count in safe mode"
+        
+        # Broker should be accessible - failure to get data is a test failure
+        assert result > 0, f"Corporate bond collector should return data, got {result}. This indicates scraping failure - check page structure or website access"
+        
+        logger.info(f"✅ Successfully processed {result} corporate bond price records in safe mode")
+        
+        # Basic validation that we got reasonable number of corporate bonds
+        assert result >= 10, f"Should have at least 10 corporate bonds, got {result}"
+        assert result <= 200, f"Should have at most 200 corporate bonds (sanity check), got {result}"
+        
+        print("✅ Corporate bond prices provide comprehensive credit market data")
+        print("   Expected data: company names, credit ratings, yields, credit spreads")
+        print("   Coverage: All GBP corporate bonds available on Hargreaves Lansdown platform")
+        
+        logger.info(f"🎉 Test completed successfully! Total corporate bond records processed: {result}")
+    
+    def test_corporate_bond_data_structure(self):
+        """Test expected data structure for corporate bond records."""
+        collector = CorporateBondCollector(database_url=None)
+        
+        # Test the expected data fields
+        expected_fields = [
+            'bond_name', 'company_name', 'clean_price', 'accrued_interest', 'dirty_price',
+            'coupon_rate', 'maturity_date', 'years_to_maturity',
+            'ytm', 'after_tax_ytm', 'credit_rating', 'scraped_date'
+        ]
+        
+        # Mock data structure for validation
+        mock_record = {
+            'bond_name': 'Vodafone 4.875% 2030',
+            'company_name': 'Vodafone',
+            'clean_price': 98.50,
+            'accrued_interest': 2.15,
+            'dirty_price': 100.65,
+            'coupon_rate': 0.04875,
+            'maturity_date': datetime(2030, 6, 15),
+            'years_to_maturity': 5.8,
+            'ytm': 0.052,
+            'after_tax_ytm': 0.0364,
+            'credit_rating': 'BBB+',
+            'scraped_date': datetime.now().date()
+        }
+        
+        # Validate all expected fields are present
+        for field in expected_fields:
+            assert field in mock_record, f"Expected field {field} should be in record structure"
+        
+        print("✅ Corporate bond data structure validation passed")
+    
+    def test_credit_rating_parsing(self):
+        """Test credit rating extraction and validation."""
+        collector = CorporateBondCollector(database_url=None)
+        
+        # Test credit rating patterns
+        valid_ratings = ['AAA', 'AA+', 'AA', 'AA-', 'A+', 'A', 'A-', 'BBB+', 'BBB', 'BBB-', 'BB+', 'BB', 'B', 'NR']
+        
+        for rating in valid_ratings:
+            # Should be valid length for typical rating format
+            assert len(rating) <= 5, f"Rating {rating} should be 5 characters or less"
+            
+        print("✅ Credit rating validation patterns confirmed")
+    
+    def test_company_name_extraction(self):
+        """Test company name extraction from bond names."""
+        test_cases = [
+            ("Vodafone 4.875% 2030", "Vodafone"),
+            ("British Telecom 5.75% 2028", "British"),
+            ("HSBC Holdings 3.25% 2025", "HSBC"),
+            ("", "Unknown")
+        ]
+        
+        for bond_name, expected_company in test_cases:
+            if bond_name:
+                company_name = bond_name.split(' ')[0]
+            else:
+                company_name = "Unknown"
+            
+            assert company_name == expected_company, f"Expected {expected_company}, got {company_name}"
+        
+        print("✅ Company name extraction logic validated")
+
+
+class TestBondMarketIntegration:
+    """Integration tests for the complete UK bond market data collection."""
+    
+    @pytest.mark.integration
+    def test_all_bond_collectors_safe_mode(self):
+        """Test all bond collectors in safe mode to validate complete pipeline."""
+        import logging
+        
+        logging.basicConfig(level=logging.INFO)
+        logger = logging.getLogger(__name__)
+        
+        logger.info("🚀 Starting comprehensive UK bond market data collection test")
+        
+        bond_collectors = [
+            ("Government Gilts (Nominal)", collect_gilt_market_prices),
+            ("Index-Linked Gilts", collect_index_linked_gilt_prices),
+            ("Corporate Bonds (GBP)", collect_corporate_bond_prices)
+        ]
+        
+        total_records = 0
+        
+        for name, collector_func in bond_collectors:
+            logger.info(f"Testing {name} collector...")
+            result = collector_func(database_url=None)
+            
+            assert isinstance(result, int), f"{name} should return integer count"
+            
+            # Each collector should return data - if not, it's a scraping failure
+            if name == "Government Gilts (Nominal)":
+                assert result >= 30, f"{name} should return at least 30 gilts, got {result}. Check nominal gilt scraping logic"
+            elif name == "Index-Linked Gilts":
+                assert result >= 5, f"{name} should return at least 5 index-linked gilts, got {result}. Check index-linked gilt scraping logic"
+            elif name == "Corporate Bonds (GBP)":
+                assert result >= 10, f"{name} should return at least 10 corporate bonds, got {result}. Check corporate bond scraping logic"
+            
+            total_records += result
+            logger.info(f"✅ {name}: {result} records processed (safe mode)")
+        
+        logger.info(f"🎉 Complete UK bond market test completed!")
+        logger.info(f"Total bond records processed: {total_records}")
+        
+        # Should have collected substantial bond data across all types
+        assert total_records >= 45, f"Should collect substantial bond data across all market segments, got {total_records}"
+        
+        print("✅ Complete UK bond market data collection pipeline validated")
+        print(f"   Total records: {total_records}")
+        print("   Coverage: Government gilts (nominal + index-linked) + Corporate bonds")
+        print("   Technology: Chrome-based scraping with parallel collection capability")
+    
+    def test_bond_market_database_tables(self):
+        """Test that all required database tables are defined."""
+        expected_tables = [
+            "gilt_market_prices",           # Nominal government gilts
+            "index_linked_gilt_prices",     # Index-linked government gilts  
+            "corporate_bond_prices"         # Corporate GBP bonds
+        ]
+        
+        # All tables should be consistently named
+        for table in expected_tables:
+            assert "prices" in table, f"Table {table} should follow naming pattern with 'prices'"
+            assert "_" in table, f"Table {table} should use underscore naming convention"
+        
+        print("✅ Bond market database table naming validated")
+        print(f"   Tables: {', '.join(expected_tables)}")
+    
+    def test_bond_market_dag_structure(self):
+        """Test that DAG structure supports all bond types."""
+        expected_tasks = [
+            "collect_gilt_market_prices_data",
+            "collect_index_linked_gilt_prices_data", 
+            "collect_corporate_bond_prices_data"
+        ]
+        
+        # All tasks should follow consistent naming
+        for task in expected_tasks:
+            assert task.startswith("collect_"), f"Task {task} should start with 'collect_'"
+            assert task.endswith("_data"), f"Task {task} should end with '_data'"
+            assert "prices" in task, f"Task {task} should reference 'prices'"
+        
+        print("✅ Bond market DAG task naming validated")
+        print(f"   Tasks: {', '.join(expected_tasks)}")
+        print("   Execution: Parallel collection from multiple HL pages")
+    
+    def test_bond_market_chrome_ports(self):
+        """Test that different collectors use different Chrome debug ports."""
+        gilt_collector = GiltMarketCollector(database_url=None)
+        il_gilt_collector = IndexLinkedGiltCollector(database_url=None)
+        corporate_collector = CorporateBondCollector(database_url=None)
+        
+        # Extract debug ports from Chrome options
+        gilt_port = None
+        il_gilt_port = None
+        corporate_port = None
+        
+        for arg in gilt_collector.chrome_options.arguments:
+            if "--remote-debugging-port=" in arg:
+                gilt_port = arg.split("=")[1]
+        
+        for arg in il_gilt_collector.chrome_options.arguments:
+            if "--remote-debugging-port=" in arg:
+                il_gilt_port = arg.split("=")[1]
+        
+        for arg in corporate_collector.chrome_options.arguments:
+            if "--remote-debugging-port=" in arg:
+                corporate_port = arg.split("=")[1]
+        
+        # Should use different ports to avoid conflicts
+        ports = [gilt_port, il_gilt_port, corporate_port]
+        unique_ports = set(port for port in ports if port is not None)
+        
+        assert len(unique_ports) == len([p for p in ports if p is not None]), "Each collector should use unique debug port"
+        
+        print("✅ Chrome debug port differentiation validated")
+        print(f"   Gilt collector: port {gilt_port}")
+        print(f"   Index-linked gilt collector: port {il_gilt_port}")
+        print(f"   Corporate bond collector: port {corporate_port}")

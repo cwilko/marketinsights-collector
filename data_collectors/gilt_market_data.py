@@ -484,3 +484,466 @@ def collect_gilt_market_prices(database_url=None):
     except Exception as e:
         collector.logger.error(f"Failed to collect gilt market prices: {str(e)}")
         raise  # Re-raise the exception to fail the Airflow task
+
+
+class IndexLinkedGiltCollector(GiltMarketCollector):
+    """
+    Collector for real-time index-linked gilt prices from Hargreaves Lansdown.
+    Scrapes index-linked gilt prices and calculates real yields.
+    """
+    
+    def __init__(self, database_url=None):
+        super().__init__(database_url)
+        self.base_url = "https://www.hl.co.uk/shares/corporate-bonds-gilts/bond-prices/uk-index-linked-gilts"
+        # Override the chrome debug port
+        self.chrome_options.add_argument("--remote-debugging-port=9223")
+    
+    def scrape_index_linked_gilt_prices(self) -> List[Dict[str, Any]]:
+        """Scrape UK Index-Linked Gilts and calculate real yields."""
+        driver = None
+        bonds = []
+        
+        try:
+            service = self._get_chrome_service()
+            driver = webdriver.Chrome(service=service, options=self.chrome_options)
+            
+            self.logger.info(f"Loading index-linked gilts page: {self.base_url}")
+            driver.get(self.base_url)
+            
+            # Wait for page to load
+            time.sleep(7)
+            
+            # Look for table rows directly (same approach as working gilt collector)
+            rows = driver.find_elements(By.CSS_SELECTOR, "table tr")
+            
+            if len(rows) == 0:
+                self.logger.warning("No table rows found - page structure may have changed")
+                return []
+            
+            self.logger.info(f"Found {len(rows)} table rows to process")
+            settlement_date = datetime.now()
+            
+            # Get header to understand structure
+            if len(rows) > 0:
+                header_cells = rows[0].find_elements(By.TAG_NAME, "th")
+                if not header_cells:
+                    header_cells = rows[0].find_elements(By.TAG_NAME, "td")
+                
+                headers = [cell.text.strip().lower() for cell in header_cells]
+                self.logger.info(f"Table structure: {headers}")
+            
+            for i, row in enumerate(rows[1:]):  # Skip header
+                try:
+                    cells = row.find_elements(By.TAG_NAME, "td")
+                    
+                    if len(cells) < 5:
+                        continue
+                    
+                    # Extract bond data - index-linked gilt table structure
+                    bond_name_element = cells[0].find_element(By.TAG_NAME, "a")
+                    bond_name = bond_name_element.text.strip()
+                    
+                    # Skip if not a Treasury bond
+                    if 'Treasury' not in bond_name:
+                        continue
+                    
+                    # Extract clean price from Price column (column 3)
+                    clean_price_text = cells[3].text.strip() if len(cells) > 3 else ""
+                    clean_price_match = re.search(r'([0-9]+\.?[0-9]*)', clean_price_text)
+                    if not clean_price_match:
+                        continue
+                    
+                    clean_price = float(clean_price_match.group(1))
+                    
+                    # Parse coupon rate from Coupon (%) column (column 1) and use as approximate real yield
+                    # Index-linked gilts don't show real yield directly on this page
+                    coupon_text = cells[1].text.strip() if len(cells) > 1 else ""
+                    coupon_match = re.search(r'([0-9]+\.?[0-9]*)', coupon_text)
+                    if not coupon_match:
+                        continue
+                    
+                    coupon_rate = float(coupon_match.group(1)) / 100  # Convert percentage to decimal
+                    
+                    # Parse maturity date from bond name
+                    maturity_match = re.search(r'(\d{4})', bond_name)
+                    if not maturity_match:
+                        continue
+                    
+                    maturity_year = int(maturity_match.group(1))
+                    
+                    # Estimate maturity date (index-linked gilts often mature in March)
+                    try:
+                        maturity_date = datetime(maturity_year, 3, 22)  # Common IL gilt maturity date
+                    except ValueError:
+                        continue
+                    
+                    # Calculate years to maturity
+                    years_to_maturity = (maturity_date - settlement_date).days / 365.25
+                    if years_to_maturity <= 0:
+                        continue
+                    
+                    # Coupon rate already parsed from Coupon (%) column above
+                    
+                    # Simplified accrued interest calculation (for now)
+                    days_since_coupon = 90  # Estimate
+                    accrued_interest = (coupon_rate / 2) * (days_since_coupon / 182.5)  # Semi-annual coupons
+                    
+                    dirty_price = clean_price + accrued_interest
+                    
+                    # Calculate proper YTM using bond pricing equation  
+                    face_value = 100.0  # Standard face value
+                    try:
+                        self.logger.debug(f"Row {i}: Calculating YTM for {bond_name} - Price: {dirty_price}, Coupon: {coupon_rate*100:.3f}%, Years: {years_to_maturity:.2f}")
+                        
+                        ytm = self.calculate_ytm_from_dirty(dirty_price, face_value, coupon_rate, years_to_maturity)
+                        
+                        if ytm is None:
+                            self.logger.warning(f"Row {i}: YTM calculation failed for {bond_name}, using coupon rate as fallback")
+                            ytm = coupon_rate  # Fallback to coupon rate
+                        else:
+                            self.logger.debug(f"Row {i}: YTM calculated successfully for {bond_name}: {ytm*100:.3f}%")
+                    
+                    except Exception as e:
+                        self.logger.error(f"Row {i}: YTM calculation error for {bond_name}: {str(e)}")
+                        ytm = coupon_rate  # Fallback to coupon rate
+                    
+                    # No tax calculation as requested - use YTM as real yield for index-linked gilts
+                    real_yield = ytm
+                    after_tax_real_yield = ytm  # Same as pre-tax YTM (no tax factors)
+                    
+                    # Ensure unique bond names
+                    unique_bond_name = bond_name
+                    existing_names = [b['bond_name'] for b in bonds]
+                    counter = 1
+                    while unique_bond_name in existing_names:
+                        counter += 1
+                        unique_bond_name = f"{bond_name} #{counter}"
+                    
+                    bonds.append({
+                        'bond_name': unique_bond_name,
+                        'clean_price': clean_price,
+                        'accrued_interest': accrued_interest,
+                        'dirty_price': dirty_price,
+                        'coupon_rate': coupon_rate,
+                        'maturity_date': maturity_date,
+                        'years_to_maturity': years_to_maturity,
+                        'real_yield': real_yield,  # Real yield instead of nominal YTM
+                        'after_tax_real_yield': after_tax_real_yield,
+                        'scraped_date': settlement_date.date(),
+                        'inflation_assumption': 3.0  # HL typically assumes 3% inflation
+                    })
+                    
+                except Exception as e:
+                    self.logger.debug(f"Error processing index-linked bond row {i}: {str(e)}")
+                    continue
+            
+            self.logger.info(f"Successfully scraped {len(bonds)} index-linked gilt prices")
+            return bonds
+        
+        except Exception as e:
+            self.logger.error(f"Scraping error: {e}")
+            return []
+        finally:
+            if driver:
+                try:
+                    driver.quit()
+                except:
+                    pass
+
+
+def collect_index_linked_gilt_prices(database_url=None):
+    """Collect real-time index-linked gilt prices from Hargreaves Lansdown."""
+    collector = IndexLinkedGiltCollector(database_url)
+    
+    try:
+        # Scrape index-linked gilt prices from broker website
+        il_gilt_data = collector.scrape_index_linked_gilt_prices()
+        
+        if not il_gilt_data:
+            collector.logger.info("No index-linked gilt data found")
+            return 0
+        
+        # Process and store data
+        bulk_data = []
+        for gilt in il_gilt_data:
+            try:
+                # Convert to database format
+                data = {
+                    'bond_name': str(gilt['bond_name']) if gilt['bond_name'] is not None else None,
+                    'clean_price': float(gilt['clean_price']) if gilt['clean_price'] is not None else None,
+                    'accrued_interest': float(gilt['accrued_interest']) if gilt['accrued_interest'] is not None else None,
+                    'dirty_price': float(gilt['dirty_price']) if gilt['dirty_price'] is not None else None,
+                    'coupon_rate': float(gilt['coupon_rate']) if gilt['coupon_rate'] is not None else None,
+                    'maturity_date': gilt['maturity_date'].date(),
+                    'years_to_maturity': float(gilt['years_to_maturity']) if gilt['years_to_maturity'] is not None else None,
+                    'real_yield': float(gilt['real_yield']) if gilt['real_yield'] is not None else None,
+                    'after_tax_real_yield': float(gilt['after_tax_real_yield']) if gilt['after_tax_real_yield'] is not None else None,
+                    'scraped_date': gilt['scraped_date'],
+                    'inflation_assumption': float(gilt['inflation_assumption']) if gilt['inflation_assumption'] is not None else None
+                }
+                bulk_data.append(data)
+                
+            except Exception as e:
+                collector.logger.error(f"Error processing index-linked gilt data: {str(e)}")
+                continue
+        
+        # Bulk upsert all records
+        if bulk_data:
+            success_count = collector.bulk_upsert_data(
+                "index_linked_gilt_prices", 
+                bulk_data,
+                conflict_columns=['bond_name', 'scraped_date']
+            )
+            if success_count == 0:
+                raise RuntimeError(f"Database upsert failed - no records were successfully stored despite having {len(bulk_data)} records to process")
+            collector.logger.info(f"Successfully stored {success_count} index-linked gilt price records")
+            return success_count
+        else:
+            collector.logger.info("No valid index-linked gilt data to process")
+            return 0
+            
+    except Exception as e:
+        collector.logger.error(f"Failed to collect index-linked gilt prices: {str(e)}")
+        raise  # Re-raise the exception to fail the Airflow task
+
+
+class CorporateBondCollector(GiltMarketCollector):
+    """
+    Collector for real-time corporate bond prices from Hargreaves Lansdown.
+    Scrapes GBP corporate bond prices and calculates yields with credit risk analysis.
+    """
+    
+    def __init__(self, database_url=None):
+        super().__init__(database_url)
+        self.base_url = "https://www.hl.co.uk/shares/corporate-bonds-gilts/bond-prices/gbp-bonds"
+        # Override the chrome options to use different debug port
+        self.chrome_options.add_argument("--remote-debugging-port=9224")
+    
+    def scrape_corporate_bond_prices(self) -> List[Dict[str, Any]]:
+        """Scrape GBP Corporate Bonds and calculate yields with credit analysis."""
+        driver = None
+        bonds = []
+        
+        try:
+            service = self._get_chrome_service()
+            driver = webdriver.Chrome(service=service, options=self.chrome_options)
+            
+            self.logger.info(f"Loading corporate bonds page: {self.base_url}")
+            driver.get(self.base_url)
+            
+            # Wait for page to load
+            time.sleep(7)
+            
+            # Look for table rows directly (same approach as working gilt collector)
+            rows = driver.find_elements(By.CSS_SELECTOR, "table tr")
+            
+            if len(rows) == 0:
+                self.logger.warning("No table rows found - page structure may have changed")
+                return []
+            
+            self.logger.info(f"Found {len(rows)} table rows to process")
+            settlement_date = datetime.now()
+            
+            # Get header to understand structure
+            if len(rows) > 0:
+                header_cells = rows[0].find_elements(By.TAG_NAME, "th")
+                if not header_cells:
+                    header_cells = rows[0].find_elements(By.TAG_NAME, "td")
+                
+                headers = [cell.text.strip().lower() for cell in header_cells]
+                self.logger.info(f"Table structure: {headers}")
+            
+            for i, row in enumerate(rows[1:]):  # Skip header
+                try:
+                    cells = row.find_elements(By.TAG_NAME, "td")
+                    
+                    if len(cells) < 5:
+                        continue
+                    
+                    # Extract bond data - corporate bond table structure
+                    bond_name_element = cells[0].find_element(By.TAG_NAME, "a")
+                    bond_name = bond_name_element.text.strip()
+                    
+                    # Skip if empty or invalid name
+                    if not bond_name:
+                        continue
+                    
+                    # Extract company name from bond name (usually first part before newline)
+                    company_name = bond_name.split('\n')[0] if bond_name else "Unknown"
+                    
+                    # Extract clean price from Price column (column 3)
+                    clean_price_text = cells[3].text.strip() if len(cells) > 3 else ""
+                    clean_price_match = re.search(r'([0-9]+\.?[0-9]*)', clean_price_text)
+                    if not clean_price_match:
+                        continue
+                    
+                    clean_price = float(clean_price_match.group(1))
+                    
+                    # Parse coupon rate from Coupon (%) column (column 1) 
+                    # Corporate bonds don't typically show YTM directly, use coupon as approximation
+                    coupon_text = cells[1].text.strip() if len(cells) > 1 else ""
+                    coupon_match = re.search(r'([0-9]+\.?[0-9]*)', coupon_text)
+                    if not coupon_match:
+                        continue
+                    
+                    coupon_rate = float(coupon_match.group(1)) / 100  # Convert percentage to decimal
+                    
+                    # YTM will be calculated after we get the maturity date and accrued interest
+                    
+                    # Parse maturity date from Maturity column (column 2)
+                    maturity_text = cells[2].text.strip() if len(cells) > 2 else ""
+                    maturity_date_match = re.search(r'(\d{4})', maturity_text)
+                    if maturity_date_match:
+                        maturity_year = int(maturity_date_match.group(1))
+                        # Try to parse the full date if possible (e.g., "3 December 2032")
+                        try:
+                            # Common formats: "3 December 2032", "30 September 2026"
+                            maturity_date = datetime.strptime(maturity_text, "%d %B %Y")
+                        except ValueError:
+                            # Fallback to mid-year estimate
+                            maturity_date = datetime(maturity_year, 6, 15)
+                    else:
+                        # Fallback: try to extract from bond name
+                        maturity_match = re.search(r'(20\d{2})', bond_name)
+                        if maturity_match:
+                            maturity_year = int(maturity_match.group(1))
+                            maturity_date = datetime(maturity_year, 6, 15)
+                        else:
+                            continue
+                    
+                    # Calculate years to maturity
+                    years_to_maturity = (maturity_date - settlement_date).days / 365.25
+                    if years_to_maturity <= 0:
+                        continue
+                    
+                    # Coupon rate already parsed from Coupon (%) column above
+                    
+                    # Calculate accrued interest (simplified)
+                    days_since_coupon = 90  # Estimate
+                    accrued_interest = (coupon_rate / 2) * (days_since_coupon / 182.5)  # Semi-annual coupons
+                    
+                    dirty_price = clean_price + accrued_interest
+                    
+                    # Calculate proper YTM using bond pricing equation
+                    face_value = 100.0  # Standard face value
+                    try:
+                        self.logger.debug(f"Row {i}: Calculating YTM for {company_name} - Price: {dirty_price}, Coupon: {coupon_rate*100:.3f}%, Years: {years_to_maturity:.2f}")
+                        
+                        ytm = self.calculate_ytm_from_dirty(dirty_price, face_value, coupon_rate, years_to_maturity)
+                        
+                        if ytm is None:
+                            self.logger.warning(f"Row {i}: YTM calculation failed for {company_name}, using coupon rate as fallback")
+                            ytm = coupon_rate  # Fallback to coupon rate
+                        else:
+                            self.logger.debug(f"Row {i}: YTM calculated successfully for {company_name}: {ytm*100:.3f}%")
+                    
+                    except Exception as e:
+                        self.logger.error(f"Row {i}: YTM calculation error for {company_name}: {str(e)}")
+                        ytm = coupon_rate  # Fallback to coupon rate
+                    
+                    # No tax calculation as requested
+                    after_tax_ytm = ytm  # Same as pre-tax YTM
+                    
+                    # Try to extract credit rating if available (often in additional columns)
+                    credit_rating = "NR"  # Not Rated default
+                    if len(cells) > 5:
+                        rating_text = cells[5].text.strip()
+                        if rating_text and len(rating_text) <= 5:  # Typical rating format
+                            credit_rating = rating_text
+                    
+                    # Ensure unique bond names
+                    unique_bond_name = bond_name
+                    existing_names = [b['bond_name'] for b in bonds]
+                    counter = 1
+                    while unique_bond_name in existing_names:
+                        counter += 1
+                        unique_bond_name = f"{bond_name} #{counter}"
+                    
+                    bonds.append({
+                        'bond_name': unique_bond_name,
+                        'company_name': company_name,
+                        'clean_price': clean_price,
+                        'accrued_interest': accrued_interest,
+                        'dirty_price': dirty_price,
+                        'coupon_rate': coupon_rate,
+                        'maturity_date': maturity_date,
+                        'years_to_maturity': years_to_maturity,
+                        'ytm': ytm,
+                        'after_tax_ytm': after_tax_ytm,
+                        'credit_rating': credit_rating,
+                        'scraped_date': settlement_date.date()
+                    })
+                    
+                except Exception as e:
+                    self.logger.debug(f"Error processing corporate bond row {i}: {str(e)}")
+                    continue
+            
+            self.logger.info(f"Successfully scraped {len(bonds)} corporate bond prices")
+            return bonds
+        
+        except Exception as e:
+            self.logger.error(f"Scraping error: {e}")
+            return []
+        finally:
+            if driver:
+                try:
+                    driver.quit()
+                except:
+                    pass
+
+
+def collect_corporate_bond_prices(database_url=None):
+    """Collect real-time corporate bond prices from Hargreaves Lansdown."""
+    collector = CorporateBondCollector(database_url)
+    
+    try:
+        # Scrape corporate bond prices from broker website
+        corporate_bond_data = collector.scrape_corporate_bond_prices()
+        
+        if not corporate_bond_data:
+            collector.logger.info("No corporate bond data found")
+            return 0
+        
+        # Process and store data
+        bulk_data = []
+        for bond in corporate_bond_data:
+            try:
+                # Convert to database format
+                data = {
+                    'bond_name': str(bond['bond_name']) if bond['bond_name'] is not None else None,
+                    'company_name': str(bond['company_name']) if bond['company_name'] is not None else None,
+                    'clean_price': float(bond['clean_price']) if bond['clean_price'] is not None else None,
+                    'accrued_interest': float(bond['accrued_interest']) if bond['accrued_interest'] is not None else None,
+                    'dirty_price': float(bond['dirty_price']) if bond['dirty_price'] is not None else None,
+                    'coupon_rate': float(bond['coupon_rate']) if bond['coupon_rate'] is not None else None,
+                    'maturity_date': bond['maturity_date'].date(),
+                    'years_to_maturity': float(bond['years_to_maturity']) if bond['years_to_maturity'] is not None else None,
+                    'ytm': float(bond['ytm']) if bond['ytm'] is not None else None,
+                    'after_tax_ytm': float(bond['after_tax_ytm']) if bond['after_tax_ytm'] is not None else None,
+                    'credit_rating': str(bond['credit_rating']) if bond['credit_rating'] is not None else None,
+                    'scraped_date': bond['scraped_date']
+                }
+                bulk_data.append(data)
+                
+            except Exception as e:
+                collector.logger.error(f"Error processing corporate bond data: {str(e)}")
+                continue
+        
+        # Bulk upsert all records
+        if bulk_data:
+            success_count = collector.bulk_upsert_data(
+                "corporate_bond_prices", 
+                bulk_data,
+                conflict_columns=['bond_name', 'scraped_date']
+            )
+            if success_count == 0:
+                raise RuntimeError(f"Database upsert failed - no records were successfully stored despite having {len(bulk_data)} records to process")
+            collector.logger.info(f"Successfully stored {success_count} corporate bond price records")
+            return success_count
+        else:
+            collector.logger.info("No valid corporate bond data to process")
+            return 0
+            
+    except Exception as e:
+        collector.logger.error(f"Failed to collect corporate bond prices: {str(e)}")
+        raise  # Re-raise the exception to fail the Airflow task
