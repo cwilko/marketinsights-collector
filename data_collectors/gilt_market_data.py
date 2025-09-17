@@ -190,6 +190,63 @@ class GiltMarketCollector(BaseCollector):
             except:
                 return datetime(year - 1, 7, 31)  # Default fallback
     
+    def _determine_face_value(self, clean_price: float) -> float:
+        """
+        Determine face value based on clean price.
+        HL quotes some bonds with £1 face value (typically when price < £2)
+        and others with £100 face value.
+        """
+        if clean_price < 2.0:
+            self.logger.debug(f"Using £1 face value for low price: {clean_price}")
+            return 1.0  # £1 face value for low-priced bonds
+        else:
+            return 100.0  # £100 face value for standard bonds
+    
+    def extract_bond_identifiers(self, bond_name_text: str, bond_link_url: str) -> Dict[str, str]:
+        """
+        Extract bond identifiers from bond name text and link URL.
+        
+        Args:
+            bond_name_text: Full text from the bond name cell
+            bond_link_url: URL of the bond name link
+            
+        Returns:
+            dict: Contains currency_code, isin, short_code, and combined_id
+        """
+        identifiers = {
+            'currency_code': None,
+            'isin': None,
+            'short_code': None,
+            'combined_id': None
+        }
+        
+        # Extract Currency Code (prioritize from text, default to GBP for HL UK pages)
+        currency_match = re.search(r'\b(GBP|USD|EUR)\b', bond_name_text)
+        if currency_match:
+            identifiers['currency_code'] = currency_match.group(1)
+        else:
+            identifiers['currency_code'] = 'GBP'  # Default for HL UK pages
+        
+        # Extract ISIN (12 characters: 2 letters + 10 alphanumeric)
+        isin_match = re.search(r'\b[A-Z]{2}[A-Z0-9]{10}\b', bond_name_text)
+        if isin_match:
+            identifiers['isin'] = isin_match.group(0)
+        
+        # Extract Short Code from URL
+        # URL format: https://www.hl.co.uk/shares/shares-search-results/{SHORT_CODE}
+        if bond_link_url:
+            url_parts = bond_link_url.split('/')
+            if len(url_parts) > 0:
+                short_code = url_parts[-1]  # Last part of URL
+                if re.match(r'^[A-Z0-9]{6,10}$', short_code):  # Validate format
+                    identifiers['short_code'] = short_code
+        
+        # Create combined ID if all parts are available
+        if identifiers['currency_code'] and identifiers['isin'] and identifiers['short_code']:
+            identifiers['combined_id'] = f"{identifiers['currency_code']} | {identifiers['isin']} | {identifiers['short_code']}"
+        
+        return identifiers
+    
     def calculate_ytm_from_dirty(self, dirty_price: float, face_value: float, 
                                coupon_rate: float, years_to_maturity: float, 
                                payments_per_year: int = 2) -> Optional[float]:
@@ -336,8 +393,21 @@ class GiltMarketCollector(BaseCollector):
                 
                 if len(cells) >= 4:
                     try:
-                        # Get bond name/issuer
-                        bond_name = cells[issuer_col].text.strip()
+                        # Get bond name/issuer and link information
+                        bond_name_cell = cells[issuer_col]
+                        bond_name_text = bond_name_cell.text.strip()  # Full cell text (includes ISIN)
+                        
+                        # Get bond link URL
+                        bond_link_url = None
+                        try:
+                            bond_link = bond_name_cell.find_element(By.TAG_NAME, "a")
+                            bond_name = bond_link.text.strip()  # Display name from link
+                            bond_link_url = bond_link.get_attribute("href")
+                        except:
+                            bond_name = bond_name_text  # Fallback to full text
+                        
+                        # Extract bond identifiers (ISIN, currency, short code)
+                        identifiers = self.extract_bond_identifiers(bond_name_text, bond_link_url)
                         
                         # Skip if not a Treasury bond
                         if 'treasury' not in bond_name.lower():
@@ -379,19 +449,22 @@ class GiltMarketCollector(BaseCollector):
                             continue
                         
                         # Calculate accrued interest
+                        # Determine face value based on clean price
+                        face_value = self._determine_face_value(clean_price)
+                        
                         last_coupon_date = self.estimate_coupon_dates(bond_name, maturity_date, settlement_date)
                         accrued_interest = self.calculate_accrued_interest(
-                            100.0, coupon_rate, last_coupon_date, settlement_date
+                            face_value, coupon_rate, last_coupon_date, settlement_date
                         )
                         
                         # Calculate dirty price
                         dirty_price = clean_price + accrued_interest
                         
                         # Calculate YTM using dirty price
-                        ytm = self.calculate_ytm_from_dirty(dirty_price, 100.0, coupon_rate, years_to_maturity)
+                        ytm = self.calculate_ytm_from_dirty(dirty_price, face_value, coupon_rate, years_to_maturity)
                         
                         # Calculate after-tax YTM (30% tax on coupons, no tax on capital gains)
-                        after_tax_ytm = self.calculate_after_tax_ytm(dirty_price, 100.0, coupon_rate, years_to_maturity, 0.30)
+                        after_tax_ytm = self.calculate_after_tax_ytm(dirty_price, face_value, coupon_rate, years_to_maturity, 0.30)
                         
                         # Create unique bond name for Treasury Strips and other duplicates
                         unique_bond_name = bond_name.split('\n')[0]  # Take first line
@@ -410,7 +483,12 @@ class GiltMarketCollector(BaseCollector):
                             'years_to_maturity': years_to_maturity,
                             'ytm': ytm,
                             'after_tax_ytm': after_tax_ytm,
-                            'scraped_date': settlement_date.date()
+                            'scraped_date': settlement_date.date(),
+                            # Bond identifiers
+                            'currency_code': identifiers['currency_code'],
+                            'isin': identifiers['isin'],
+                            'short_code': identifiers['short_code'],
+                            'combined_id': identifiers['combined_id']
                         })
                         
                     except Exception as e:
@@ -458,7 +536,12 @@ def collect_gilt_market_prices(database_url=None):
                     'years_to_maturity': float(gilt['years_to_maturity']) if gilt['years_to_maturity'] is not None else None,
                     'ytm': float(gilt['ytm']) if gilt['ytm'] is not None else None,
                     'after_tax_ytm': float(gilt['after_tax_ytm']) if gilt['after_tax_ytm'] is not None else None,
-                    'scraped_date': gilt['scraped_date']
+                    'scraped_date': gilt['scraped_date'],
+                    # Bond identifiers
+                    'currency_code': str(gilt['currency_code']) if gilt['currency_code'] is not None else None,
+                    'isin': str(gilt['isin']) if gilt['isin'] is not None else None,
+                    'short_code': str(gilt['short_code']) if gilt['short_code'] is not None else None,
+                    'combined_id': str(gilt['combined_id']) if gilt['combined_id'] is not None else None
                 }
                 bulk_data.append(data)
                 
@@ -541,12 +624,21 @@ class IndexLinkedGiltCollector(GiltMarketCollector):
                         continue
                     
                     # Extract bond data - index-linked gilt table structure
+                    bond_name_cell = cells[0]
+                    bond_name_text = bond_name_cell.text.strip()  # Full cell text (includes ISIN)
+                    
+                    # Get bond link information
+                    bond_link_url = None
                     try:
-                        bond_name_element = cells[0].find_element(By.TAG_NAME, "a")
-                        bond_name = bond_name_element.text.strip()
+                        bond_name_element = bond_name_cell.find_element(By.TAG_NAME, "a")
+                        bond_name = bond_name_element.text.strip()  # Display name from link
+                        bond_link_url = bond_name_element.get_attribute("href")
                     except Exception as e:
                         self.logger.debug(f"Row {i}: No bond name link found, skipping: {str(e)}")
                         continue
+                    
+                    # Extract bond identifiers (ISIN, currency, short code)
+                    identifiers = self.extract_bond_identifiers(bond_name_text, bond_link_url)
                     
                     # Skip if not a Treasury bond
                     if 'Treasury' not in bond_name:
@@ -631,7 +723,8 @@ class IndexLinkedGiltCollector(GiltMarketCollector):
                     dirty_price = clean_price + accrued_interest
                     
                     # Calculate proper YTM using bond pricing equation  
-                    face_value = 100.0  # Standard face value
+                    # Determine face value based on clean price
+                    face_value = self._determine_face_value(clean_price)
                     try:
                         self.logger.debug(f"Row {i}: Calculating YTM for {bond_name} - Price: {dirty_price}, Coupon: {coupon_rate*100:.3f}%, Years: {years_to_maturity:.2f}")
                         
@@ -670,7 +763,12 @@ class IndexLinkedGiltCollector(GiltMarketCollector):
                         'real_yield': real_yield,  # Real yield instead of nominal YTM
                         'after_tax_real_yield': after_tax_real_yield,
                         'scraped_date': settlement_date.date(),
-                        'inflation_assumption': 3.0  # HL typically assumes 3% inflation
+                        'inflation_assumption': 3.0,  # HL typically assumes 3% inflation
+                        # Bond identifiers
+                        'currency_code': identifiers['currency_code'],
+                        'isin': identifiers['isin'],
+                        'short_code': identifiers['short_code'],
+                        'combined_id': identifiers['combined_id']
                     })
                     
                 except Exception as e:
@@ -722,7 +820,12 @@ def collect_index_linked_gilt_prices(database_url=None):
                     'real_yield': float(gilt['real_yield']) if gilt['real_yield'] is not None else None,
                     'after_tax_real_yield': float(gilt['after_tax_real_yield']) if gilt['after_tax_real_yield'] is not None else None,
                     'scraped_date': gilt['scraped_date'],
-                    'inflation_assumption': float(gilt['inflation_assumption']) if gilt['inflation_assumption'] is not None else None
+                    'inflation_assumption': float(gilt['inflation_assumption']) if gilt['inflation_assumption'] is not None else None,
+                    # Bond identifiers
+                    'currency_code': str(gilt['currency_code']) if gilt['currency_code'] is not None else None,
+                    'isin': str(gilt['isin']) if gilt['isin'] is not None else None,
+                    'short_code': str(gilt['short_code']) if gilt['short_code'] is not None else None,
+                    'combined_id': str(gilt['combined_id']) if gilt['combined_id'] is not None else None
                 }
                 bulk_data.append(data)
                 
@@ -858,12 +961,24 @@ class CorporateBondCollector(GiltMarketCollector):
                         continue
                     
                     # Extract bond data - corporate bond table structure
-                    bond_name_element = cells[0].find_element(By.TAG_NAME, "a")
-                    bond_name = bond_name_element.text.strip()
+                    bond_name_cell = cells[0]
+                    bond_name_text = bond_name_cell.text.strip()  # Full cell text (includes ISIN)
+                    
+                    # Get bond link information
+                    bond_link_url = None
+                    try:
+                        bond_name_element = bond_name_cell.find_element(By.TAG_NAME, "a")
+                        bond_name = bond_name_element.text.strip()  # Display name from link
+                        bond_link_url = bond_name_element.get_attribute("href")
+                    except:
+                        bond_name = bond_name_text  # Fallback to full text
                     
                     # Skip if empty or invalid name
                     if not bond_name:
                         continue
+                    
+                    # Extract bond identifiers (ISIN, currency, short code)
+                    identifiers = self.extract_bond_identifiers(bond_name_text, bond_link_url)
                     
                     # Extract company name from bond name (usually first part before newline)
                     company_name = bond_name.split('\n')[0] if bond_name else "Unknown"
@@ -922,7 +1037,8 @@ class CorporateBondCollector(GiltMarketCollector):
                     dirty_price = clean_price + accrued_interest
                     
                     # Calculate proper YTM using bond pricing equation
-                    face_value = 100.0  # Standard face value
+                    # Determine face value based on clean price
+                    face_value = self._determine_face_value(clean_price)
                     try:
                         self.logger.debug(f"Row {i}: Calculating YTM for {company_name} - Price: {dirty_price}, Coupon: {coupon_rate*100:.3f}%, Years: {years_to_maturity:.2f}")
                         
@@ -968,7 +1084,12 @@ class CorporateBondCollector(GiltMarketCollector):
                         'ytm': ytm,
                         'after_tax_ytm': after_tax_ytm,
                         'credit_rating': credit_rating,
-                        'scraped_date': settlement_date.date()
+                        'scraped_date': settlement_date.date(),
+                        # Bond identifiers
+                        'currency_code': identifiers['currency_code'],
+                        'isin': identifiers['isin'],
+                        'short_code': identifiers['short_code'],
+                        'combined_id': identifiers['combined_id']
                     })
                     processed_count += 1
                     
@@ -1027,7 +1148,12 @@ def collect_corporate_bond_prices(database_url=None):
                     'ytm': float(bond['ytm']) if bond['ytm'] is not None else None,
                     'after_tax_ytm': float(bond['after_tax_ytm']) if bond['after_tax_ytm'] is not None else None,
                     'credit_rating': str(bond['credit_rating']) if bond['credit_rating'] is not None else None,
-                    'scraped_date': bond['scraped_date']
+                    'scraped_date': bond['scraped_date'],
+                    # Bond identifiers
+                    'currency_code': str(bond['currency_code']) if bond['currency_code'] is not None else None,
+                    'isin': str(bond['isin']) if bond['isin'] is not None else None,
+                    'short_code': str(bond['short_code']) if bond['short_code'] is not None else None,
+                    'combined_id': str(bond['combined_id']) if bond['combined_id'] is not None else None
                 }
                 bulk_data.append(data)
                 
