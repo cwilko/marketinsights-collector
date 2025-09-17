@@ -169,7 +169,7 @@ class BaseCollector:
             self.logger.error(f"Failed to bulk upsert data to {table}: {str(e)}")
             if conn:
                 conn.rollback()
-            return total_processed  # Return what we managed to process
+            raise  # Re-raise the exception to fail the task
         finally:
             if conn:
                 conn.close()
