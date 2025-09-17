@@ -762,6 +762,41 @@ class CorporateBondCollector(GiltMarketCollector):
         # Override the chrome options to use different debug port
         self.chrome_options.add_argument("--remote-debugging-port=9224")
     
+    def _is_bond_tradeable(self, row_element) -> bool:
+        """
+        Check if a corporate bond can be traded online.
+        
+        Filters out bonds that have "Online dealing is not available" indicators
+        in their action elements.
+        
+        Args:
+            row_element: Selenium WebElement representing the table row
+            
+        Returns:
+            bool: True if bond can be traded, False otherwise
+        """
+        try:
+            cells = row_element.find_elements(By.TAG_NAME, "td")
+            
+            if len(cells) < 5:  # Need at least 5 columns including Actions
+                return False
+            
+            # Check Actions column (column 4) for disabled indicators
+            actions_cell = cells[4]
+            action_elements = actions_cell.find_elements(By.TAG_NAME, "a") + actions_cell.find_elements(By.TAG_NAME, "button")
+            
+            for element in action_elements:
+                element_title = element.get_attribute("title") or ""
+                if "not available" in element_title.lower():
+                    self.logger.debug(f"Bond not tradeable: {element_title}")
+                    return False
+            
+            return True
+            
+        except Exception as e:
+            self.logger.debug(f"Error checking bond tradeability: {str(e)}")
+            return False  # Safe default - skip if we can't determine
+    
     def scrape_corporate_bond_prices(self) -> List[Dict[str, Any]]:
         """Scrape GBP Corporate Bonds and calculate yields with credit analysis."""
         driver = None
@@ -787,6 +822,12 @@ class CorporateBondCollector(GiltMarketCollector):
             self.logger.info(f"Found {len(rows)} table rows to process")
             settlement_date = datetime.now()
             
+            # Tracking variables for filtering
+            total_rows = len(rows) - 1  # Exclude header
+            non_tradeable_count = 0
+            na_maturity_count = 0
+            processed_count = 0
+            
             # Get header to understand structure
             if len(rows) > 0:
                 header_cells = rows[0].find_elements(By.TAG_NAME, "th")
@@ -798,9 +839,22 @@ class CorporateBondCollector(GiltMarketCollector):
             
             for i, row in enumerate(rows[1:]):  # Skip header
                 try:
+                    # Check if bond is tradeable first (filter out non-tradeable bonds)
+                    if not self._is_bond_tradeable(row):
+                        non_tradeable_count += 1
+                        self.logger.debug(f"Row {i+1}: Skipping non-tradeable bond")
+                        continue
+                    
                     cells = row.find_elements(By.TAG_NAME, "td")
                     
                     if len(cells) < 5:
+                        continue
+                    
+                    # Check for n/a maturity early (before parsing)
+                    maturity_text = cells[2].text.strip() if len(cells) > 2 else ""
+                    if maturity_text.lower() in ['n/a', 'na', '', '-']:
+                        na_maturity_count += 1
+                        self.logger.debug(f"Row {i+1}: Skipping bond with n/a maturity: {maturity_text}")
                         continue
                     
                     # Extract bond data - corporate bond table structure
@@ -916,10 +970,19 @@ class CorporateBondCollector(GiltMarketCollector):
                         'credit_rating': credit_rating,
                         'scraped_date': settlement_date.date()
                     })
+                    processed_count += 1
                     
                 except Exception as e:
                     self.logger.debug(f"Error processing corporate bond row {i}: {str(e)}")
                     continue
+            
+            # Log filtering summary
+            self.logger.info(f"Corporate bond filtering summary:")
+            self.logger.info(f"  Total rows processed: {total_rows}")
+            self.logger.info(f"  Non-tradeable bonds filtered: {non_tradeable_count}")
+            self.logger.info(f"  N/A maturity bonds filtered: {na_maturity_count}")
+            self.logger.info(f"  Successfully processed bonds: {processed_count}")
+            self.logger.info(f"  Final bond count: {len(bonds)}")
             
             self.logger.info(f"Successfully scraped {len(bonds)} corporate bond prices")
             return bonds
