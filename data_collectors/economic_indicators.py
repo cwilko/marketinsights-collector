@@ -1503,7 +1503,7 @@ def collect_uk_gilt_yields(database_url=None):
                 
             data = {
                 "date": obs_date,
-                "maturity": item["maturity"],
+                "maturity_years": item["maturity"],
                 "yield_rate": item["yield_rate"]
             }
             bulk_data.append(data)
@@ -1512,12 +1512,12 @@ def collect_uk_gilt_yields(database_url=None):
             collector.logger.error(f"Error processing gilt yield data for {item.get('date', 'unknown')}: {str(e)}")
     
     # Sort by date and maturity for consistency
-    bulk_data.sort(key=lambda x: (x["date"], x["maturity"]))
+    bulk_data.sort(key=lambda x: (x["date"], x["maturity_years"]))
     
     # Bulk upsert all records
     if bulk_data:
         success_count = collector.bulk_upsert_data("uk_gilt_yields", bulk_data, 
-                                                 conflict_columns=['date', 'maturity'])
+                                                 conflict_columns=['date', 'maturity_years'])
         collector.logger.info(f"Successfully bulk upserted {success_count} UK gilt yield records")
         return success_count
     else:
