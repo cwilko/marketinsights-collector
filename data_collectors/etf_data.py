@@ -220,16 +220,31 @@ class VanguardETFCollector(BaseCollector):
                 except:
                     self.logger.info("Original download button selector failed")
                 
-                # Try broader selectors
+                # Debug: List all download-related elements on the page
+                try:
+                    all_download_elements = driver.find_elements(By.XPATH, '//*[contains(text(), "Download") or contains(text(), "download")]')
+                    self.logger.info(f"Found {len(all_download_elements)} elements containing 'Download':")
+                    for i, elem in enumerate(all_download_elements[:10]):  # Limit to first 10
+                        try:
+                            self.logger.info(f"  {i}: '{elem.text}' (tag: {elem.tag_name})")
+                        except:
+                            self.logger.info(f"  {i}: [Could not get text] (tag: {elem.tag_name})")
+                except Exception as e:
+                    self.logger.info(f"Could not list download elements: {e}")
+                
+                # Try specific selectors for price download button
                 if not download_button:
                     selectors = [
+                        # Target the specific "Download XXXX prices" button
+                        '//span[contains(text(), "Download") and contains(text(), "prices")]/parent::button',
+                        '//button[.//span[contains(text(), "Download") and contains(text(), "prices")]]',
+                        '//*[contains(text(), "Download") and contains(text(), "prices")]',
+                        '//span[contains(text(), "Download") and contains(text(), "prices")]',
+                        # Fallback to more generic selectors
                         '//button[contains(text(), "Download")]',
                         '//a[contains(text(), "Download")]',
                         '//button[contains(., "Download")]',
-                        '//a[contains(., "Download")]',
-                        '//button[contains(text(), "price")]',
-                        '//a[contains(text(), "price")]',
-                        '//*[contains(text(), "Download") and contains(text(), "price")]'
+                        '//a[contains(., "Download")]'
                     ]
                     
                     for selector in selectors:
@@ -237,6 +252,11 @@ class VanguardETFCollector(BaseCollector):
                             download_button = driver.find_element(By.XPATH, selector)
                             self.logger.info(f"Found download element with selector: {selector}")
                             self.logger.info(f"Element text: '{download_button.text}'")
+                            # Verify this is the prices download button
+                            if "prices" in download_button.text.lower():
+                                self.logger.info("✓ Confirmed this is the prices download button")
+                            else:
+                                self.logger.info("⚠ This might not be the prices download button")
                             break
                         except:
                             continue
