@@ -64,7 +64,7 @@ class VanguardETFCollector(BaseCollector):
         self.chrome_options = self._setup_chrome_options()
     
     def _setup_chrome_options(self):
-        """Configure Chrome options for K8s-friendly headless scraping."""
+        """Configure Chrome options for K8s-friendly headless scraping with anti-detection."""
         from selenium.webdriver.chrome.options import Options
         options = Options()
         options.add_argument("--headless")
@@ -72,6 +72,28 @@ class VanguardETFCollector(BaseCollector):
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-gpu")
         options.add_argument("--remote-debugging-port=9222")
+        
+        # Anti-detection improvements
+        options.add_argument("--disable-blink-features=AutomationControlled")
+        options.add_argument("--disable-extensions")
+        options.add_argument("--disable-plugins")
+        options.add_argument("--disable-web-security")
+        options.add_argument("--disable-features=VizDisplayCompositor")
+        options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        options.add_argument("--window-size=1920,1080")
+        
+        # Remove automation indicators
+        options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        options.add_experimental_option('useAutomationExtension', False)
+        
+        # Set realistic browser preferences
+        prefs = {
+            "profile.default_content_setting_values": {
+                "notifications": 2
+            }
+        }
+        options.add_experimental_option("prefs", prefs)
+        
         return options
     
     def _get_chrome_service(self):
@@ -183,6 +205,14 @@ class VanguardETFCollector(BaseCollector):
             driver = webdriver.Chrome(service=service, options=chrome_options)
             
             try:
+                # Apply JavaScript anti-detection scripts
+                self.logger.info("Applying stealth scripts to bypass bot detection")
+                driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+                driver.execute_script("delete navigator.__proto__.webdriver")
+                
+                # Set realistic window size
+                driver.set_window_size(1920, 1080)
+                
                 self.logger.info(f"Loading Vanguard page for {etf_ticker}")
                 driver.get(url)
                 
@@ -190,7 +220,26 @@ class VanguardETFCollector(BaseCollector):
                 WebDriverWait(driver, 20).until(
                     EC.presence_of_element_located((By.TAG_NAME, 'body'))
                 )
-                time.sleep(15)  # Wait longer for Angular to render in K8s
+                
+                # Human-like behavior simulation
+                import random
+                self.logger.info("Simulating human-like behavior")
+                
+                # Random initial delay
+                time.sleep(random.uniform(3, 6))
+                
+                # Simulate scrolling behavior
+                driver.execute_script("window.scrollTo(0, document.body.scrollHeight/4);")
+                time.sleep(random.uniform(1, 3))
+                
+                driver.execute_script("window.scrollTo(0, document.body.scrollHeight/2);")
+                time.sleep(random.uniform(2, 4))
+                
+                driver.execute_script("window.scrollTo(0, 0);")
+                time.sleep(random.uniform(1, 2))
+                
+                # Additional wait for Angular to render in K8s
+                time.sleep(random.uniform(8, 12))
                 
                 # Debug: Log page title and check for download elements
                 self.logger.info(f"Page title: {driver.title}")
