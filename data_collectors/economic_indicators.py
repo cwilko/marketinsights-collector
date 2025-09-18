@@ -399,24 +399,24 @@ class BankOfEnglandCollector(BaseCollector):
                         
                         # Extract yields for each maturity (columns 1, 2, 3)
                         maturities = [
-                            ('5Y', 1),   # IUDSNPY - 5 Year
-                            ('10Y', 2),  # IUDMNPY - 10 Year  
-                            ('20Y', 3)   # IUDLNPY - 20 Year
+                            (5.0, 1),   # IUDSNPY - 5 Year
+                            (10.0, 2),  # IUDMNPY - 10 Year  
+                            (20.0, 3)   # IUDLNPY - 20 Year
                         ]
                         
-                        for maturity, col_idx in maturities:
+                        for maturity_years, col_idx in maturities:
                             try:
                                 if col_idx < len(row) and not pd.isna(row.iloc[col_idx]):
                                     yield_rate = float(row.iloc[col_idx])
                                     
                                     yield_data.append({
                                         'date': obs_date,
-                                        'maturity': maturity,
+                                        'maturity': maturity_years,  # Now numeric
                                         'yield_rate': yield_rate
                                     })
                                     
                             except (ValueError, IndexError) as e:
-                                self.logger.debug(f"Skipping {maturity} yield for {date_str}: {str(e)}")
+                                self.logger.debug(f"Skipping {maturity_years}Y yield for {date_str}: {str(e)}")
                                 continue
                         
                     except (ValueError, TypeError) as e:
