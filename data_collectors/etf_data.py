@@ -207,6 +207,19 @@ class VanguardETFCollector(BaseCollector):
                     except:
                         pass
                 
+                # Debug: Output page HTML to understand structure
+                self.logger.info("=== PAGE HTML DEBUG START ===")
+                try:
+                    page_source = driver.page_source
+                    # Log page source in chunks to avoid log truncation
+                    chunk_size = 2000
+                    for i in range(0, len(page_source), chunk_size):
+                        chunk = page_source[i:i+chunk_size]
+                        self.logger.info(f"HTML chunk {i//chunk_size + 1}: {chunk}")
+                    self.logger.info(f"=== PAGE HTML DEBUG END (total chars: {len(page_source)}) ===")
+                except Exception as e:
+                    self.logger.error(f"Could not get page source: {e}")
+                
                 # Look for download-related elements with multiple strategies
                 download_button = None
                 
@@ -220,15 +233,30 @@ class VanguardETFCollector(BaseCollector):
                 except:
                     self.logger.info("Original download button selector failed")
                 
-                # Debug: List all download-related elements on the page
+                # Debug: List all download-related elements on the page after navigation
                 try:
                     all_download_elements = driver.find_elements(By.XPATH, '//*[contains(text(), "Download") or contains(text(), "download")]')
                     self.logger.info(f"Found {len(all_download_elements)} elements containing 'Download':")
-                    for i, elem in enumerate(all_download_elements[:10]):  # Limit to first 10
+                    for i, elem in enumerate(all_download_elements[:15]):  # Check more elements
                         try:
-                            self.logger.info(f"  {i}: '{elem.text}' (tag: {elem.tag_name})")
+                            elem_text = elem.text.strip()
+                            if elem_text:
+                                self.logger.info(f"  {i}: '{elem_text}' (tag: {elem.tag_name})")
+                                # Look for price-related text
+                                if "price" in elem_text.lower():
+                                    self.logger.info(f"    ✓ Element {i} contains 'price': '{elem_text}'")
                         except:
                             self.logger.info(f"  {i}: [Could not get text] (tag: {elem.tag_name})")
+                    
+                    # Also look for elements containing both Download and numbers (price count)
+                    price_download_elements = driver.find_elements(By.XPATH, '//*[contains(text(), "Download") and contains(text(), "price")]')
+                    self.logger.info(f"Found {len(price_download_elements)} elements containing both 'Download' and 'price':")
+                    for i, elem in enumerate(price_download_elements):
+                        try:
+                            self.logger.info(f"  Price download {i}: '{elem.text}' (tag: {elem.tag_name})")
+                        except:
+                            self.logger.info(f"  Price download {i}: [Could not get text] (tag: {elem.tag_name})")
+                            
                 except Exception as e:
                     self.logger.info(f"Could not list download elements: {e}")
                 
