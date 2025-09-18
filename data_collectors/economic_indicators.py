@@ -1546,10 +1546,14 @@ class BoEYieldCurveCollector(BaseCollector):
                 # Create records for each maturity
                 for i, (maturity, yield_val) in enumerate(zip(maturities, yield_values)):
                     if pd.notna(yield_val) and float(yield_val) > 0:  # Filter out zero/negative yields
+                        # Convert from percentage to decimal format to match dashboard expectations
+                        # BoE data comes as percentage (e.g., 3.5), dashboard expects decimal (e.g., 0.035)
+                        yield_decimal = float(yield_val) / 100.0
+                        
                         parsed_data.append({
                             'date': date_val.date(),
                             'maturity_years': float(maturity),
-                            'yield_rate': float(yield_val),
+                            'yield_rate': yield_decimal,
                             'yield_type': yield_type
                         })
             
