@@ -252,24 +252,45 @@ class GiltMarketCollector(BaseCollector):
                                payments_per_year: int = 2) -> Optional[float]:
         """Calculate YTM using dirty price."""
         coupon_payment = (coupon_rate * face_value) / payments_per_year
-        total_periods = int(years_to_maturity * payments_per_year)
+        total_periods = years_to_maturity * payments_per_year  # Keep as float, don't round to int
+        
+        # Handle edge case where bond has essentially no time remaining
+        if total_periods <= 0.01:  # Less than ~3.6 days remaining
+            self.logger.warning(f"Bond has minimal time remaining (years_to_maturity: {years_to_maturity})")
+            return None
         
         def bond_price_equation(ytm):
             if ytm == 0:
                 return coupon_payment * total_periods + face_value - dirty_price
             
             periodic_rate = ytm / payments_per_year
-            present_value_coupons = coupon_payment * (1 - (1 + periodic_rate) ** -total_periods) / periodic_rate
-            present_value_face = face_value / (1 + periodic_rate) ** total_periods
             
-            return present_value_coupons + present_value_face - dirty_price
+            # Avoid numerical issues with very negative rates
+            if periodic_rate <= -0.99:
+                return float('inf')
+            
+            try:
+                present_value_coupons = coupon_payment * (1 - (1 + periodic_rate) ** -total_periods) / periodic_rate
+                present_value_face = face_value / (1 + periodic_rate) ** total_periods
+                return present_value_coupons + present_value_face - dirty_price
+            except (OverflowError, ZeroDivisionError):
+                return float('inf')
         
-        initial_guess = coupon_rate if coupon_rate > 0 else 0.05
+        # Use approximate YTM as initial guess
+        initial_guess = (coupon_rate + (face_value - dirty_price) / years_to_maturity) / ((face_value + dirty_price) / 2)
         
         try:
-            ytm_solution = fsolve(bond_price_equation, initial_guess)[0]
-            return ytm_solution
-        except:
+            ytm_solution = fsolve(bond_price_equation, initial_guess, xtol=1e-8)[0]
+            
+            # Sanity check: YTM should be reasonable (between -50% and 100%)
+            if -0.5 <= ytm_solution <= 1.0:
+                return ytm_solution
+            else:
+                self.logger.warning(f"YTM calculation returned unreasonable value: {ytm_solution*100:.2f}%")
+                return None
+                
+        except Exception as e:
+            self.logger.warning(f"YTM calculation failed: {str(e)}")
             return None
     
     def calculate_after_tax_ytm(self, dirty_price: float, face_value: float, 
@@ -731,14 +752,13 @@ class IndexLinkedGiltCollector(GiltMarketCollector):
                         ytm = self.calculate_ytm_from_dirty(dirty_price, face_value, coupon_rate, years_to_maturity)
                         
                         if ytm is None:
-                            self.logger.warning(f"Row {i}: YTM calculation failed for {bond_name}, using coupon rate as fallback")
-                            ytm = coupon_rate  # Fallback to coupon rate
-                        else:
-                            self.logger.debug(f"Row {i}: YTM calculated successfully for {bond_name}: {ytm*100:.3f}%")
+                            raise ValueError(f"YTM calculation failed for {bond_name} - Price: {dirty_price}, Coupon: {coupon_rate*100:.3f}%, Years: {years_to_maturity:.2f}")
+                        
+                        self.logger.debug(f"Row {i}: YTM calculated successfully for {bond_name}: {ytm*100:.3f}%")
                     
                     except Exception as e:
                         self.logger.error(f"Row {i}: YTM calculation error for {bond_name}: {str(e)}")
-                        ytm = coupon_rate  # Fallback to coupon rate
+                        raise
                     
                     # No tax calculation as requested - use YTM as real yield for index-linked gilts
                     real_yield = ytm
@@ -991,6 +1011,11 @@ class CorporateBondCollector(GiltMarketCollector):
                     
                     clean_price = float(clean_price_match.group(1))
                     
+                    # Skip bonds with unrealistic prices (bad source data)
+                    if clean_price <= 0.1:  # Skip if price is 10p or less
+                        self.logger.warning(f"Row {i}: Skipping {company_name} - unrealistic price: £{clean_price:.3f}")
+                        continue
+                    
                     # Parse coupon rate from Coupon (%) column (column 1) 
                     # Corporate bonds don't typically show YTM directly, use coupon as approximation
                     coupon_text = cells[1].text.strip() if len(cells) > 1 else ""
@@ -1045,14 +1070,13 @@ class CorporateBondCollector(GiltMarketCollector):
                         ytm = self.calculate_ytm_from_dirty(dirty_price, face_value, coupon_rate, years_to_maturity)
                         
                         if ytm is None:
-                            self.logger.warning(f"Row {i}: YTM calculation failed for {company_name}, using coupon rate as fallback")
-                            ytm = coupon_rate  # Fallback to coupon rate
-                        else:
-                            self.logger.debug(f"Row {i}: YTM calculated successfully for {company_name}: {ytm*100:.3f}%")
+                            raise ValueError(f"YTM calculation failed for {company_name} - Price: {dirty_price}, Coupon: {coupon_rate*100:.3f}%, Years: {years_to_maturity:.2f}")
+                        
+                        self.logger.debug(f"Row {i}: YTM calculated successfully for {company_name}: {ytm*100:.3f}%")
                     
                     except Exception as e:
                         self.logger.error(f"Row {i}: YTM calculation error for {company_name}: {str(e)}")
-                        ytm = coupon_rate  # Fallback to coupon rate
+                        raise
                     
                     # No tax calculation as requested
                     after_tax_ytm = ytm  # Same as pre-tax YTM
