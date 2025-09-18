@@ -277,13 +277,80 @@ class VanguardETFCollector(BaseCollector):
                 # Parse the Excel file
                 df = pd.read_excel(downloaded_file, skiprows=8)
                 df = df.dropna(how='all')
+                
+                # Debug: Log DataFrame structure before column assignment
+                self.logger.info(f"DataFrame shape after reading: {df.shape}")
+                self.logger.info(f"DataFrame columns: {list(df.columns)}")
+                if len(df) > 0:
+                    self.logger.info(f"Sample data (first row): {df.iloc[0].tolist()}")
+                
+                # Validate DataFrame has expected number of columns
+                if df.shape[1] < 3:
+                    self.logger.error(f"Expected at least 3 columns in Excel file, but found {df.shape[1]} columns")
+                    self.logger.error(f"Available columns: {list(df.columns)}")
+                    
+                    # Try alternative parsing strategies
+                    self.logger.info("Trying alternative parsing strategies with different skiprows...")
+                    for skip_rows in [0, 1, 2, 5, 6, 7, 9, 10]:
+                        try:
+                            df_alt = pd.read_excel(downloaded_file, skiprows=skip_rows)
+                            df_alt = df_alt.dropna(how='all')
+                            self.logger.info(f"skiprows={skip_rows}: shape={df_alt.shape}, columns={list(df_alt.columns)}")
+                            if df_alt.shape[1] >= 3:
+                                self.logger.info(f"Found 3+ columns with skiprows={skip_rows}")
+                                df = df_alt
+                                break
+                        except Exception as e:
+                            self.logger.info(f"skiprows={skip_rows} failed: {str(e)}")
+                            continue
+                    
+                    # If still insufficient columns, file format may have changed
+                    if df.shape[1] < 3:
+                        raise ValueError(f"Cannot parse Excel file: expected at least 3 columns (Date, NAV, Market Price) but found {df.shape[1]} columns. The file format may have changed.")
+                
+                # Debug: Log final DataFrame structure before column selection
+                self.logger.info(f"Final DataFrame shape before column selection: {df.shape}")
+                self.logger.info(f"Final DataFrame columns before selection: {list(df.columns)}")
+                
+                # Take only the first 3 columns (in case there are extra columns)
+                if df.shape[1] > 3:
+                    self.logger.info(f"DataFrame has {df.shape[1]} columns, taking only first 3")
+                df = df.iloc[:, :3]
+                
+                # Debug: Log after column selection
+                self.logger.info(f"After column selection: shape={df.shape}, columns={list(df.columns)}")
+                
                 df.columns = ['Date', 'NAV_GBP', 'Market_Price_GBP']
+                self.logger.info(f"After column renaming: columns={list(df.columns)}")
                 
                 # Clean and convert data
-                df['Date'] = pd.to_datetime(df['Date'], format='%d %b %Y')
-                df['NAV_GBP'] = df['NAV_GBP'].astype(str).str.replace('£', '').astype(float)
-                df['Market_Price_GBP'] = df['Market_Price_GBP'].astype(str).str.replace('£', '').astype(float)
-                df['Premium_Discount'] = (df['Market_Price_GBP'] - df['NAV_GBP']) / df['NAV_GBP']
+                try:
+                    # Handle date parsing with error checking
+                    df['Date'] = pd.to_datetime(df['Date'], format='%d %b %Y', errors='coerce')
+                    
+                    # Clean and convert price columns with error handling
+                    df['NAV_GBP'] = df['NAV_GBP'].astype(str).str.replace('£', '').str.replace(',', '')
+                    df['Market_Price_GBP'] = df['Market_Price_GBP'].astype(str).str.replace('£', '').str.replace(',', '')
+                    
+                    # Convert to numeric with error handling
+                    df['NAV_GBP'] = pd.to_numeric(df['NAV_GBP'], errors='coerce')
+                    df['Market_Price_GBP'] = pd.to_numeric(df['Market_Price_GBP'], errors='coerce')
+                    
+                    # Remove rows with invalid data
+                    df = df.dropna(subset=['Date', 'NAV_GBP', 'Market_Price_GBP'])
+                    
+                    if len(df) == 0:
+                        raise ValueError("No valid data rows found after cleaning")
+                    
+                    # Calculate premium/discount
+                    df['Premium_Discount'] = (df['Market_Price_GBP'] - df['NAV_GBP']) / df['NAV_GBP']
+                    
+                except Exception as e:
+                    self.logger.error(f"Error cleaning data: {str(e)}")
+                    self.logger.error(f"Data types: {df.dtypes}")
+                    if len(df) > 0:
+                        self.logger.error(f"Sample problematic data: {df.iloc[0]}")
+                    raise
                 
                 # Add ETF metadata
                 df['ETF_Ticker'] = etf_ticker

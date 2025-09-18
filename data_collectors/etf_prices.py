@@ -237,7 +237,13 @@ def collect_etf_prices(database_url=None, etf_tickers=None):
         if etf_tickers:
             # Collect specific tickers
             all_records = []
-            for ticker in etf_tickers:
+            for i, ticker in enumerate(etf_tickers):
+                # Add 5-second delay between requests to avoid rate limiting (except for first request)
+                if i > 0:
+                    collector.logger.info(f"Waiting 5 seconds before fetching {ticker} data to avoid rate limiting...")
+                    import time
+                    time.sleep(5)
+                
                 records = collector.get_etf_price_data(ticker, start_date)
                 all_records.extend(records)
             etf_price_data = all_records
