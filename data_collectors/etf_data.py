@@ -190,18 +190,69 @@ class VanguardETFCollector(BaseCollector):
                 WebDriverWait(driver, 20).until(
                     EC.presence_of_element_located((By.TAG_NAME, 'body'))
                 )
-                time.sleep(10)  # Wait for Angular to render
+                time.sleep(15)  # Wait longer for Angular to render in K8s
+                
+                # Debug: Log page title and check for download elements
+                self.logger.info(f"Page title: {driver.title}")
+                self.logger.info(f"Page URL: {driver.current_url}")
+                
+                # Look for any buttons on the page first
+                all_buttons = driver.find_elements(By.TAG_NAME, 'button')
+                self.logger.info(f"Found {len(all_buttons)} buttons on page")
+                for i, btn in enumerate(all_buttons[:10]):  # Log first 10 buttons
+                    try:
+                        btn_text = btn.text.strip()
+                        if btn_text:
+                            self.logger.info(f"Button {i}: '{btn_text}'")
+                    except:
+                        pass
+                
+                # Look for download-related elements with multiple strategies
+                download_button = None
+                
+                # Try original selector
+                try:
+                    download_button = driver.find_element(
+                        By.XPATH, 
+                        '//button[contains(., "Download") and contains(., "prices")]'
+                    )
+                    self.logger.info("Found download button with original selector")
+                except:
+                    self.logger.info("Original download button selector failed")
+                
+                # Try broader selectors
+                if not download_button:
+                    selectors = [
+                        '//button[contains(text(), "Download")]',
+                        '//a[contains(text(), "Download")]',
+                        '//button[contains(., "Download")]',
+                        '//a[contains(., "Download")]',
+                        '//button[contains(text(), "price")]',
+                        '//a[contains(text(), "price")]',
+                        '//*[contains(text(), "Download") and contains(text(), "price")]'
+                    ]
+                    
+                    for selector in selectors:
+                        try:
+                            download_button = driver.find_element(By.XPATH, selector)
+                            self.logger.info(f"Found download element with selector: {selector}")
+                            self.logger.info(f"Element text: '{download_button.text}'")
+                            break
+                        except:
+                            continue
+                
+                if not download_button:
+                    self.logger.error("Could not find any download button - page might not have loaded properly")
+                    # Save page source for debugging
+                    page_source = driver.page_source
+                    if len(page_source) < 1000:
+                        self.logger.error(f"Page source seems incomplete ({len(page_source)} chars)")
+                    return None
                 
                 # Clear any existing downloads
                 existing_files = glob.glob(f'{download_dir}/*')
                 for f in existing_files:
                     os.remove(f)
-                
-                # Find and click download button
-                download_button = driver.find_element(
-                    By.XPATH, 
-                    '//button[contains(., "Download") and contains(., "prices")]'
-                )
                 
                 self.logger.info(f"Found download button: {download_button.text}")
                 driver.execute_script('arguments[0].click();', download_button)

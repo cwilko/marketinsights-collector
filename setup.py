@@ -13,12 +13,12 @@ setup(
         "lxml>=4.9.0",
     ],
     extras_require={
-        "gilt_market": [
+        "selenium": [
             "scipy>=1.11.0",
             "selenium>=4.15.0",
             "webdriver-manager>=4.0.0",
         ],
-        "uk_swaps": [
+        "investiny": [
             "investiny @ git+https://github.com/cwilko/investiny.git@feature/curl-cffi-support",
         ],
     },
