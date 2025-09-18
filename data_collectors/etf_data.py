@@ -61,6 +61,84 @@ class VanguardETFCollector(BaseCollector):
             }
             # Add more Vanguard ETFs as needed
         }
+        self.chrome_options = self._setup_chrome_options()
+    
+    def _setup_chrome_options(self):
+        """Configure Chrome options for K8s-friendly headless scraping."""
+        from selenium.webdriver.chrome.options import Options
+        options = Options()
+        options.add_argument("--headless")
+        options.add_argument("--no-sandbox") 
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-gpu")
+        options.add_argument("--remote-debugging-port=9222")
+        return options
+    
+    def _get_chrome_service(self):
+        """Get Chrome service for both K8s and development environments."""
+        import platform
+        import os
+        from selenium.webdriver.chrome.service import Service
+        
+        arch = platform.machine().lower()
+        system = platform.system()
+        
+        # Try K8s/ARM64 Linux paths first (Chrome container)
+        if arch in ['aarch64', 'arm64'] and system == 'Linux':
+            # Check shared volume locations (init container installation)
+            shared_paths = [
+                '/shared/usr/bin/chromedriver',  # Most likely location from chromium-driver package
+                '/shared/usr/lib/chromium-browser/chromedriver',
+                '/shared/snap/chromium/current/usr/lib/chromium-browser/chromedriver'
+            ]
+            
+            for path in shared_paths:
+                if os.path.exists(path):
+                    self.logger.info(f"Using K8s ChromeDriver from init container: {path}")
+                    
+                    # Set library path for copied shared libraries
+                    current_ld_path = os.environ.get('LD_LIBRARY_PATH', '')
+                    shared_lib_paths = [
+                        '/shared/lib/aarch64-linux-gnu',
+                        '/shared/usr/lib/aarch64-linux-gnu', 
+                        '/shared/usr/lib',
+                        '/shared/lib'
+                    ]
+                    # Only add paths that exist
+                    existing_paths = [p for p in shared_lib_paths if os.path.exists(p)]
+                    if existing_paths:
+                        new_ld_path = ':'.join(existing_paths)
+                        if current_ld_path:
+                            new_ld_path = f"{new_ld_path}:{current_ld_path}"
+                        os.environ['LD_LIBRARY_PATH'] = new_ld_path
+                        self.logger.info(f"Set LD_LIBRARY_PATH for K8s: {new_ld_path}")
+                    
+                    return Service(path)
+            
+            # Check standard K8s locations
+            standard_paths = [
+                '/usr/bin/chromedriver',
+                '/usr/local/bin/chromedriver',
+                '/opt/chromedriver/chromedriver'
+            ]
+            
+            for path in standard_paths:
+                if os.path.exists(path):
+                    self.logger.info(f"Using standard K8s ChromeDriver: {path}")
+                    return Service(path)
+        
+        # Development environment fallback - use webdriver-manager
+        try:
+            from webdriver_manager.chrome import ChromeDriverManager
+            driver_path = ChromeDriverManager().install()
+            self.logger.info(f"Using webdriver-manager ChromeDriver: {driver_path}")
+            return Service(driver_path)
+        except Exception as e:
+            self.logger.warning(f"webdriver-manager failed: {e}")
+        
+        # Final fallback - let Selenium find ChromeDriver
+        self.logger.info("Using default Selenium ChromeDriver discovery")
+        return Service()
     
     def get_vanguard_etf_data(self, etf_ticker: str) -> Optional[Dict[str, Any]]:
         """
@@ -91,10 +169,8 @@ class VanguardETFCollector(BaseCollector):
             download_dir = f'/tmp/vanguard_downloads_{etf_ticker}'
             os.makedirs(download_dir, exist_ok=True)
             
-            chrome_options = Options()
-            chrome_options.add_argument('--headless')
-            chrome_options.add_argument('--no-sandbox')
-            chrome_options.add_argument('--disable-dev-shm-usage')
+            # Add download preferences to existing chrome options
+            chrome_options = self.chrome_options
             chrome_options.add_experimental_option('prefs', {
                 'download.default_directory': download_dir,
                 'download.prompt_for_download': False,
@@ -102,7 +178,9 @@ class VanguardETFCollector(BaseCollector):
                 'safebrowsing.enabled': True
             })
             
-            driver = webdriver.Chrome(options=chrome_options)
+            # Use the proper Chrome service for K8s environment
+            service = self._get_chrome_service()
+            driver = webdriver.Chrome(service=service, options=chrome_options)
             
             try:
                 self.logger.info(f"Loading Vanguard page for {etf_ticker}")
@@ -516,21 +594,78 @@ class iSharesETFCollector(BaseCollector):
         try:
             import xml.etree.ElementTree as ET
             import re
+            from datetime import datetime
             
             content_str = content.decode('utf-8-sig')
             
-            # Extract worksheet names
-            worksheet_pattern = r'ss:Name="([^"]+)"'
-            worksheet_names = re.findall(worksheet_pattern, content_str)
+            # Parse XML
+            root = ET.fromstring(content_str)
             
-            self.logger.info(f"Found worksheets in XML Excel: {worksheet_names}")
+            # Define namespace
+            ns = {'ss': 'urn:schemas-microsoft-com:office:spreadsheet'}
             
-            # For now, return empty structure - full XML parsing would be complex
-            # This is a placeholder for future enhancement if needed
             worksheets = {}
-            for name in worksheet_names:
-                worksheets[name] = pd.DataFrame()  # Empty placeholder
             
+            # Find all worksheets
+            for worksheet in root.findall('.//ss:Worksheet', ns):
+                sheet_name = worksheet.get('{urn:schemas-microsoft-com:office:spreadsheet}Name', 'Unknown')
+                
+                # Extract table data
+                table = worksheet.find('.//ss:Table', ns)
+                if table is not None:
+                    rows_data = []
+                    
+                    # Get all rows
+                    for row in table.findall('.//ss:Row', ns):
+                        row_data = []
+                        cells = row.findall('.//ss:Cell', ns)
+                        
+                        for cell in cells:
+                            data_elem = cell.find('.//ss:Data', ns)
+                            if data_elem is not None:
+                                row_data.append(data_elem.text if data_elem.text else '')
+                            else:
+                                row_data.append('')
+                        
+                        if row_data:  # Only add non-empty rows
+                            rows_data.append(row_data)
+                    
+                    # Convert to DataFrame
+                    if rows_data:
+                        # Find the maximum number of columns across all rows
+                        max_cols = max(len(row) for row in rows_data)
+                        
+                        # Normalize all rows to have the same number of columns
+                        normalized_rows = []
+                        for row in rows_data:
+                            normalized_row = row + [''] * (max_cols - len(row))
+                            normalized_rows.append(normalized_row[:max_cols])
+                        
+                        # Use first row as headers if it looks like headers, otherwise generate column names
+                        if len(normalized_rows) > 1 and normalized_rows[0]:
+                            headers = [str(h) if h else f'Col_{i}' for i, h in enumerate(normalized_rows[0])]
+                            data_rows = normalized_rows[1:]
+                        else:
+                            headers = [f'Col_{i}' for i in range(max_cols)]
+                            data_rows = normalized_rows
+                        
+                        # Ensure headers length exactly matches max_cols
+                        if len(headers) != max_cols:
+                            headers = [f'Col_{i}' for i in range(max_cols)]
+                        
+                        # Create DataFrame
+                        if data_rows:
+                            df = pd.DataFrame(data_rows, columns=headers)
+                            worksheets[sheet_name] = df
+                            self.logger.info(f"Parsed {sheet_name} worksheet: {df.shape[0]} rows, {df.shape[1]} columns")
+                        else:
+                            worksheets[sheet_name] = pd.DataFrame()
+                    else:
+                        worksheets[sheet_name] = pd.DataFrame()
+                else:
+                    worksheets[sheet_name] = pd.DataFrame()
+            
+            self.logger.info(f"Successfully parsed XML Excel with worksheets: {list(worksheets.keys())}")
             return worksheets
             
         except Exception as e:
@@ -551,7 +686,7 @@ class iSharesETFCollector(BaseCollector):
                 df = worksheets[sheet_name]
                 
                 # Look for date and NAV columns
-                date_cols = [col for col in df.columns if 'date' in str(col).lower()]
+                date_cols = [col for col in df.columns if 'date' in str(col).lower() or 'as of' in str(col).lower()]
                 nav_cols = [col for col in df.columns if 'nav' in str(col).lower() or 'price' in str(col).lower()]
                 
                 if date_cols and nav_cols:
