@@ -64,35 +64,18 @@ class VanguardETFCollector(BaseCollector):
         self.chrome_options = self._setup_chrome_options()
     
     def _setup_chrome_options(self):
-        """Configure Chrome options for K8s-friendly headless scraping with anti-detection."""
-        from selenium.webdriver.chrome.options import Options
-        options = Options()
+        """Configure Chrome options for K8s-friendly headless scraping with undetected-chromedriver."""
+        import undetected_chromedriver as uc
+        options = uc.ChromeOptions()
+        
+        # Essential K8s options
         options.add_argument("--headless")
         options.add_argument("--no-sandbox") 
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-gpu")
-        options.add_argument("--remote-debugging-port=9222")
-        
-        # Anti-detection improvements
         options.add_argument("--disable-blink-features=AutomationControlled")
         options.add_argument("--disable-extensions")
-        options.add_argument("--disable-plugins")
-        options.add_argument("--disable-web-security")
-        options.add_argument("--disable-features=VizDisplayCompositor")
-        options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
         options.add_argument("--window-size=1920,1080")
-        
-        # Remove automation indicators
-        options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        options.add_experimental_option('useAutomationExtension', False)
-        
-        # Set realistic browser preferences
-        prefs = {
-            "profile.default_content_setting_values": {
-                "notifications": 2
-            }
-        }
-        options.add_experimental_option("prefs", prefs)
         
         return options
     
@@ -200,19 +183,13 @@ class VanguardETFCollector(BaseCollector):
                 'safebrowsing.enabled': True
             })
             
-            # Use the proper Chrome service for K8s environment
-            service = self._get_chrome_service()
-            driver = webdriver.Chrome(service=service, options=chrome_options)
+            # Use undetected-chromedriver for automatic stealth
+            import undetected_chromedriver as uc
+            self.logger.info("Using undetected-chromedriver for automatic bot detection bypass")
+            # Create driver with explicit version management disabled for K8s
+            driver = uc.Chrome(options=chrome_options, version_main=None, driver_executable_path=None)
             
             try:
-                # Apply JavaScript anti-detection scripts
-                self.logger.info("Applying stealth scripts to bypass bot detection")
-                driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-                driver.execute_script("delete navigator.__proto__.webdriver")
-                
-                # Set realistic window size
-                driver.set_window_size(1920, 1080)
-                
                 self.logger.info(f"Loading Vanguard page for {etf_ticker}")
                 driver.get(url)
                 
@@ -220,26 +197,7 @@ class VanguardETFCollector(BaseCollector):
                 WebDriverWait(driver, 20).until(
                     EC.presence_of_element_located((By.TAG_NAME, 'body'))
                 )
-                
-                # Human-like behavior simulation
-                import random
-                self.logger.info("Simulating human-like behavior")
-                
-                # Random initial delay
-                time.sleep(random.uniform(3, 6))
-                
-                # Simulate scrolling behavior
-                driver.execute_script("window.scrollTo(0, document.body.scrollHeight/4);")
-                time.sleep(random.uniform(1, 3))
-                
-                driver.execute_script("window.scrollTo(0, document.body.scrollHeight/2);")
-                time.sleep(random.uniform(2, 4))
-                
-                driver.execute_script("window.scrollTo(0, 0);")
-                time.sleep(random.uniform(1, 2))
-                
-                # Additional wait for Angular to render in K8s
-                time.sleep(random.uniform(8, 12))
+                time.sleep(15)  # Wait for Angular to render in K8s
                 
                 # Debug: Log page title and check for download elements
                 self.logger.info(f"Page title: {driver.title}")
@@ -256,18 +214,16 @@ class VanguardETFCollector(BaseCollector):
                     except:
                         pass
                 
-                # Debug: Output page HTML to understand structure
-                self.logger.info("=== PAGE HTML DEBUG START ===")
+                # Check if historical prices are available (quick check)
                 try:
-                    page_source = driver.page_source
-                    # Log page source in chunks to avoid log truncation
-                    chunk_size = 2000
-                    for i in range(0, len(page_source), chunk_size):
-                        chunk = page_source[i:i+chunk_size]
-                        self.logger.info(f"HTML chunk {i//chunk_size + 1}: {chunk}")
-                    self.logger.info(f"=== PAGE HTML DEBUG END (total chars: {len(page_source)}) ===")
+                    unavailable_elements = driver.find_elements(By.XPATH, '//*[contains(text(), "Temporarily unavailable")]')
+                    if unavailable_elements:
+                        self.logger.warning("Historical Prices section still shows 'Temporarily unavailable'")
+                        self.logger.warning("Bot detection may still be active despite undetected-chromedriver")
+                    else:
+                        self.logger.info("No 'Temporarily unavailable' messages found - good sign!")
                 except Exception as e:
-                    self.logger.error(f"Could not get page source: {e}")
+                    self.logger.info(f"Could not check for availability messages: {e}")
                 
                 # Look for download-related elements with multiple strategies
                 download_button = None
