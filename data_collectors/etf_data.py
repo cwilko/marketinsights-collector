@@ -187,13 +187,20 @@ class VanguardETFCollector(BaseCollector):
             import undetected_chromedriver as uc
             self.logger.info("Using undetected-chromedriver for automatic bot detection bypass")
             
-            # For K8s ARM64, use the existing ChromeDriver from the container
+            # For K8s ARM64, copy ChromeDriver to writable location for patching
             import platform
+            import os
+            import shutil
+            import tempfile
+            
             if platform.machine().lower() in ['aarch64', 'arm64']:
-                # Use existing ChromeDriver in K8s container
-                chromedriver_path = '/usr/bin/chromedriver'
-                self.logger.info(f"ARM64 detected - using existing ChromeDriver: {chromedriver_path}")
-                driver = uc.Chrome(options=chrome_options, driver_executable_path=chromedriver_path, version_main=None)
+                # Copy ChromeDriver to writable temp location for undetected-chromedriver to patch
+                temp_dir = tempfile.mkdtemp()
+                temp_chromedriver = os.path.join(temp_dir, 'chromedriver')
+                shutil.copy2('/usr/bin/chromedriver', temp_chromedriver)
+                os.chmod(temp_chromedriver, 0o755)
+                self.logger.info(f"ARM64 detected - copied ChromeDriver to writable location: {temp_chromedriver}")
+                driver = uc.Chrome(options=chrome_options, driver_executable_path=temp_chromedriver, version_main=None)
             else:
                 # Let undetected-chromedriver handle binary management for x86
                 driver = uc.Chrome(options=chrome_options, version_main=None)
