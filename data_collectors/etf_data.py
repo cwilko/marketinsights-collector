@@ -851,6 +851,9 @@ def collect_ishares_etf_nav(database_url=None, etf_tickers=['IGLT']) -> int:
             collector.logger.error(f"Error collecting data for {etf_ticker}: {str(e)}")
             continue
     
+    if total_records == 0:
+        raise RuntimeError(f"Failed to collect any ETF NAV data for {etf_tickers}. Check logs for specific errors.")
+    
     collector.logger.info(f"Total ETF NAV records collected: {total_records}")
     return total_records
 
@@ -913,6 +916,9 @@ def collect_vanguard_etf_data(database_url=None, etf_tickers=['VGOV']) -> int:
         except Exception as e:
             collector.logger.error(f"Error collecting {ticker}: {str(e)}")
     
+    if total_records == 0:
+        raise RuntimeError(f"Failed to collect any Vanguard ETF data for {etf_tickers}. Check logs for specific errors.")
+    
     return total_records
 
 
@@ -947,5 +953,8 @@ def collect_ssga_etf_data(database_url=None, etf_tickers=['GLTY']) -> int:
                 
         except Exception as e:
             collector.logger.error(f"Error collecting {ticker}: {str(e)}")
+    
+    if total_records == 0:
+        raise RuntimeError(f"Failed to collect any SSGA ETF data for {etf_tickers}. Check logs for specific errors.")
     
     return total_records
