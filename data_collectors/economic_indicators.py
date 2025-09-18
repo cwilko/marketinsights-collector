@@ -1460,6 +1460,355 @@ def collect_uk_daily_bank_rate(database_url=None):
         collector.logger.info("No valid UK Daily Bank Rate data to process")
         return 0
 
+class BoEYieldCurveCollector(BaseCollector):
+    """Collector for comprehensive Bank of England yield curve data from ZIP files."""
+    
+    def __init__(self, database_url=None):
+        super().__init__(database_url)
+        self.base_url = "https://www.bankofengland.co.uk/-/media/boe/files/statistics/yield-curves"
+        
+        # Available data sources
+        self.data_sources = {
+            'nominal': {
+                'current': 'latest-yield-curve-data.zip',
+                'historical': 'glcnominalddata.zip',
+                'file_prefix': 'GLC Nominal daily data',
+                'sheet': '4. spot curve'
+            },
+            'real': {
+                'current': 'latest-yield-curve-data.zip',
+                'historical': 'glcrealddata.zip',
+                'file_prefix': 'GLC Real daily data',
+                'sheet': '4. spot curve'
+            },
+            'inflation': {
+                'current': 'latest-yield-curve-data.zip', 
+                'historical': 'glcinflationddata.zip',
+                'file_prefix': 'GLC Inflation daily data',
+                'sheet': '4. spot curve'
+            },
+            'ois': {
+                'current': 'latest-yield-curve-data.zip',
+                'historical': 'oisddata.zip',
+                'file_prefix': 'OIS daily data',
+                'sheet': '4. spot curve'
+            }
+        }
+    
+    def parse_yield_data(self, filename, yield_type):
+        """Parse Bank of England yield curve data from Excel files.
+        
+        Automatically finds the worksheet containing 'spot curve' in its name,
+        which works across all historical files regardless of exact naming.
+        """
+        import pandas as pd
+        from datetime import datetime
+        import openpyxl
+        
+        try:
+            # Find the worksheet containing "spot curve" in its name
+            wb = openpyxl.load_workbook(filename, read_only=True)
+            spot_curve_sheet = None
+            
+            for sheet_name in wb.sheetnames:
+                if "spot curve" in sheet_name.lower():
+                    spot_curve_sheet = sheet_name
+                    break
+            
+            wb.close()
+            
+            if not spot_curve_sheet:
+                raise ValueError(f"No worksheet containing 'spot curve' found in {filename}")
+            
+            # Read the correct worksheet
+            df = pd.read_excel(filename, sheet_name=spot_curve_sheet)
+            
+            # Get maturities from row 2 (skip first column)
+            maturities = df.iloc[2, 1:].values
+            maturities = [float(m) for m in maturities if pd.notna(m)]
+            
+            # Get data rows (skip first 3 rows which are headers)
+            data_rows = df.iloc[3:]
+            
+            # Process each data row
+            parsed_data = []
+            for _, row in data_rows.iterrows():
+                date_val = row.iloc[0]
+                
+                # Skip rows without dates
+                if pd.isna(date_val) or not isinstance(date_val, datetime):
+                    continue
+                    
+                # Get yield values (skip first column which is date, and handle potential empty second column)
+                start_col = 2 if pd.isna(row.iloc[1]) else 1
+                yield_values = row.iloc[start_col:start_col+len(maturities)].values
+                
+                # Create records for each maturity
+                for i, (maturity, yield_val) in enumerate(zip(maturities, yield_values)):
+                    if pd.notna(yield_val) and float(yield_val) > 0:  # Filter out zero/negative yields
+                        parsed_data.append({
+                            'date': date_val.date(),
+                            'maturity_years': float(maturity),
+                            'yield_rate': float(yield_val),
+                            'yield_type': yield_type
+                        })
+            
+            return parsed_data
+            
+        except Exception as e:
+            self.logger.error(f"Error parsing yield data from {filename}: {str(e)}")
+            return []
+    
+    def download_and_extract_zip(self, zip_filename, temp_dir='./temp_yield_data'):
+        """Download and extract BoE yield curve ZIP file."""
+        import requests
+        import zipfile
+        import os
+        import tempfile
+        
+        try:
+            # Create temp directory
+            os.makedirs(temp_dir, exist_ok=True)
+            
+            # Download ZIP file with browser-like headers to bypass anti-bot detection
+            url = f"{self.base_url}/{zip_filename}"
+            self.logger.info(f"Downloading yield curve data from {url}")
+            
+            # Add realistic browser headers to avoid 403 Forbidden errors
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'none',
+                'Cache-Control': 'max-age=0'
+            }
+            
+            response = requests.get(url, headers=headers, stream=True, timeout=60)
+            response.raise_for_status()
+            
+            zip_path = os.path.join(temp_dir, zip_filename)
+            with open(zip_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            
+            # Extract ZIP file
+            extracted_files = []
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                for file_info in zip_ref.filelist:
+                    if file_info.filename.endswith('.xlsx'):
+                        extracted_path = zip_ref.extract(file_info, temp_dir)
+                        extracted_files.append(extracted_path)
+            
+            # Clean up ZIP file
+            os.remove(zip_path)
+            
+            return extracted_files
+            
+        except Exception as e:
+            self.logger.error(f"Error downloading/extracting {zip_filename}: {str(e)}")
+            return []
+    
+    def store_yield_data(self, data_records):
+        """Store yield curve data in database."""
+        if not data_records:
+            return 0
+        
+        # Prepare data for bulk upsert
+        bulk_data = []
+        for record in data_records:
+            bulk_data.append({
+                "date": record["date"],
+                "maturity_years": record["maturity_years"], 
+                "yield_rate": record["yield_rate"],
+                "yield_type": record["yield_type"]
+            })
+        
+        # Sort by date and maturity for consistency
+        bulk_data.sort(key=lambda x: (x["date"], x["maturity_years"]))
+        
+        # Bulk upsert all records
+        if bulk_data:
+            success_count = self.bulk_upsert_data("boe_yield_curves", bulk_data,
+                                                 conflict_columns=['date', 'maturity_years', 'yield_type'])
+            return success_count
+        
+        return 0
+    
+    def get_yield_type_date_range(self, yield_type):
+        """Get date range for collection for a specific yield type."""
+        from datetime import datetime
+        
+        end_date = datetime.now().date()
+        
+        if self.database_url is None:
+            # Safe mode - always return None to collect all historical data
+            return None, end_date
+        
+        try:
+            import psycopg2
+            conn = psycopg2.connect(self.database_url)
+            cursor = conn.cursor()
+            
+            # Check for existing data for this specific yield type
+            cursor.execute("""
+                SELECT MAX(date) FROM boe_yield_curves 
+                WHERE yield_type = %s
+            """, (yield_type,))
+            
+            result = cursor.fetchone()
+            cursor.close()
+            conn.close()
+            
+            if result and result[0]:
+                # Data exists for this yield type, collect from next day
+                from datetime import timedelta
+                start_date = result[0] + timedelta(days=1)
+                self.logger.info(f"Fetching incremental data for boe_yield_curves from {start_date} to {end_date}")
+                return start_date, end_date
+            else:
+                # No data exists for this yield type - collect all historical data
+                self.logger.info(f"No existing data in boe_yield_curves, fetching all available historical data")
+                return None, end_date
+                
+        except Exception as e:
+            self.logger.warning(f"Could not check existing data for {yield_type}: {e}")
+            # Fallback to collecting recent data only
+            from datetime import timedelta
+            start_date = end_date - timedelta(days=365)
+            return start_date, end_date
+
+    def collect_all_yield_types(self, yield_types, include_historical=True):
+        """
+        Collect all yield types by downloading shared ZIP files once and processing all yield types.
+        This prevents downloading the same latest-yield-curve-data.zip file multiple times.
+        """
+        import tempfile
+        import os
+        import shutil
+        
+        total_records = 0
+        temp_dir = tempfile.mkdtemp(prefix='boe_yield_optimized_')
+        
+        try:
+            self.logger.info("🚀 Starting BoE yield curve collection")
+            
+            # Step 1 & 2: Download and extract latest ZIP file once (contains all yield types)
+            latest_zip_name = 'latest-yield-curve-data.zip'
+            
+            self.logger.info(f"Downloading and extracting latest ZIP file once for all yield types: {latest_zip_name}")
+            latest_files = self.download_and_extract_zip(latest_zip_name, temp_dir)
+            
+            # Step 3: Process each yield type from the same extracted files
+            for yield_type in yield_types:
+                self.logger.info(f"Processing {yield_type} yield curves from shared ZIP")
+                
+                if yield_type not in self.data_sources:
+                    self.logger.warning(f"Unknown yield type: {yield_type}")
+                    continue
+                
+                source_config = self.data_sources[yield_type]
+                
+                # Find files for this yield type in the extracted files
+                latest_data = []
+                for file_path in latest_files:
+                    filename = os.path.basename(file_path)
+                    if source_config['file_prefix'] in filename and 'current month' in filename:
+                        self.logger.info(f"Processing latest file: {filename}")
+                        data = self.parse_yield_data(file_path, yield_type)
+                        if data:
+                            latest_data.extend(data)
+                            self.logger.info(f"Extracted {len(data)} {yield_type} records from {filename}")
+                
+                # Step 4: Determine date range and check if historical data needed (yield type specific)
+                start_date, end_date = self.get_yield_type_date_range(yield_type)
+                
+                # Step 5: Handle historical data if needed (yield type specific)
+                # Collect historical data if: 1) empty database (start_date=None), or 2) gap detected
+                if include_historical and latest_data and (start_date is None or start_date):
+                    # Check if latest data covers the gap
+                    data_start = min(d['date'] for d in latest_data)
+                    
+                    # Determine if we should collect historical data
+                    should_collect_historical = False
+                    if start_date is None:
+                        # Empty database - collect all historical data (safe mode or production)
+                        should_collect_historical = True
+                        mode = "safe mode" if self.database_url is None else "production"
+                        self.logger.info(f"Empty database ({mode}): collecting all historical data for {yield_type}")
+                    elif start_date and data_start > start_date:
+                        gap_days = (data_start - start_date).days
+                        should_collect_historical = True
+                        self.logger.info(f"Gap detected for {yield_type}: {gap_days} days, downloading historical data")
+                    
+                    if should_collect_historical:
+                        # Download and extract historical ZIP for this specific yield type
+                        historical_zip_name = source_config['historical']
+                        historical_temp_dir = os.path.join(temp_dir, f'{yield_type}_historical')
+                        
+                        try:
+                            historical_files = self.download_and_extract_zip(historical_zip_name, historical_temp_dir)
+                            
+                            # Process historical files for gap filling
+                            for file_path in historical_files:
+                                filename = os.path.basename(file_path)
+                                if source_config['file_prefix'] in filename and 'current month' not in filename:
+                                    data = self.parse_yield_data(file_path, yield_type)
+                                    if data:
+                                        # Filter historical data based on scenario
+                                        if start_date is None:  # Empty database - collect all historical data
+                                            gap_data = [d for d in data if d['date'] < data_start]
+                                        else:  # Incremental update - only collect gap data
+                                            gap_data = [d for d in data if start_date <= d['date'] < data_start]
+                                        if gap_data:
+                                            latest_data.extend(gap_data)
+                                            self.logger.info(f"Added {len(gap_data)} historical {yield_type} records")
+                        except Exception as e:
+                            self.logger.warning(f"Could not download historical data for {yield_type}: {str(e)}")
+                
+                # Step 6: Store data for this yield type
+                if latest_data:
+                    count = self.store_yield_data(latest_data)
+                    total_records += count
+                    self.logger.info(f"Stored {count} {yield_type} yield curve records")
+                else:
+                    self.logger.info(f"No {yield_type} data to store")
+            
+            self.logger.info(f"✅ Optimized collection completed: {total_records} total records")
+            return total_records
+            
+        except Exception as e:
+            self.logger.error(f"Error in optimized collection: {str(e)}")
+            raise
+        finally:
+            # Clean up temp directory
+            if os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir)
+
+
+def collect_boe_yield_curves(database_url=None, yield_types=['nominal', 'real', 'inflation', 'ois'], include_historical=True):
+    """Collect comprehensive Bank of England yield curve data from ZIP files."""
+    collector = BoEYieldCurveCollector(database_url)
+    total_records = 0
+    
+    # Download shared ZIP files once and process all yield types
+    # The latest-yield-curve-data.zip contains all 4 yield types, so we download it once
+    collector.logger.info(f"Starting BoE yield curve collection for {len(yield_types)} yield types: {yield_types}")
+    
+    try:
+        # Download and process shared latest ZIP file once - no fallback
+        total_records += collector.collect_all_yield_types(yield_types, include_historical)
+    except Exception as e:
+        collector.logger.error(f"BoE yield curve collection failed: {str(e)}")
+        raise Exception(f"BoE yield curve collection failed: {str(e)}")
+    
+    collector.logger.info(f"Total BoE yield curve records collected: {total_records}")
+    return total_records
+
 def collect_uk_gilt_yields(database_url=None):
     """Collect UK gilt yields (5Y, 10Y, 20Y) data with incremental updates using Bank of England IADB."""
     from datetime import timedelta
