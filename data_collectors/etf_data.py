@@ -186,8 +186,17 @@ class VanguardETFCollector(BaseCollector):
             # Use undetected-chromedriver for automatic stealth
             import undetected_chromedriver as uc
             self.logger.info("Using undetected-chromedriver for automatic bot detection bypass")
-            # Create driver with explicit version management disabled for K8s
-            driver = uc.Chrome(options=chrome_options, version_main=None, driver_executable_path=None)
+            
+            # For K8s ARM64, use the existing ChromeDriver from the container
+            import platform
+            if platform.machine().lower() in ['aarch64', 'arm64']:
+                # Use existing ChromeDriver in K8s container
+                chromedriver_path = '/usr/bin/chromedriver'
+                self.logger.info(f"ARM64 detected - using existing ChromeDriver: {chromedriver_path}")
+                driver = uc.Chrome(options=chrome_options, driver_executable_path=chromedriver_path, version_main=None)
+            else:
+                # Let undetected-chromedriver handle binary management for x86
+                driver = uc.Chrome(options=chrome_options, version_main=None)
             
             try:
                 self.logger.info(f"Loading Vanguard page for {etf_ticker}")
