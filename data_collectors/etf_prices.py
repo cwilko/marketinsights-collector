@@ -33,28 +33,28 @@ class ETFPricesCollector(BaseCollector):
         self.etf_symbols = {
             'IGLT': {
                 'symbol': 'iShares Core UK Gilts UCITS ETF',
-                'ticker_id': '8832',  # From investing.com
+                'ticker_id': '38403',  # From investing.com (corrected)
                 'description': 'iShares Core UK Gilts UCITS ETF',
                 'currency': 'GBP',
                 'provider': 'iShares'
             },
             'INXG': {
                 'symbol': 'iShares UK Index-Linked Gilts UCITS ETF',
-                'ticker_id': '8837',  # From investing.com
+                'ticker_id': '38411',  # From investing.com (corrected)
                 'description': 'iShares UK Index-Linked Gilts UCITS ETF',
                 'currency': 'GBP',
                 'provider': 'iShares'
             },
             'VGOV': {
                 'symbol': 'Vanguard UK Government Bond UCITS ETF',
-                'ticker_id': '13120',  # From investing.com
+                'ticker_id': '45747',  # From investing.com (corrected)
                 'description': 'Vanguard UK Government Bond UCITS ETF',
                 'currency': 'GBP',
                 'provider': 'Vanguard'
             },
             'GLTY': {
                 'symbol': 'SPDR Bloomberg UK Gilt UCITS ETF',
-                'ticker_id': '13147',  # From investing.com
+                'ticker_id': '45552',  # From investing.com (corrected)
                 'description': 'SPDR Bloomberg UK Gilt UCITS ETF',
                 'currency': 'GBP',
                 'provider': 'SSGA'

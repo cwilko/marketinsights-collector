@@ -215,31 +215,6 @@ class VanguardETFCollector(BaseCollector):
                 )
                 time.sleep(15)  # Wait for Angular to render in K8s
                 
-                # Debug: Log page title and check for download elements
-                self.logger.info(f"Page title: {driver.title}")
-                self.logger.info(f"Page URL: {driver.current_url}")
-                
-                # Look for any buttons on the page first
-                all_buttons = driver.find_elements(By.TAG_NAME, 'button')
-                self.logger.info(f"Found {len(all_buttons)} buttons on page")
-                for i, btn in enumerate(all_buttons[:10]):  # Log first 10 buttons
-                    try:
-                        btn_text = btn.text.strip()
-                        if btn_text:
-                            self.logger.info(f"Button {i}: '{btn_text}'")
-                    except:
-                        pass
-                
-                # Check if historical prices are available (quick check)
-                try:
-                    unavailable_elements = driver.find_elements(By.XPATH, '//*[contains(text(), "Temporarily unavailable")]')
-                    if unavailable_elements:
-                        self.logger.warning("Historical Prices section still shows 'Temporarily unavailable'")
-                        self.logger.warning("Bot detection may still be active despite undetected-chromedriver")
-                    else:
-                        self.logger.info("No 'Temporarily unavailable' messages found - good sign!")
-                except Exception as e:
-                    self.logger.info(f"Could not check for availability messages: {e}")
                 
                 # Look for download-related elements with multiple strategies
                 download_button = None
@@ -250,36 +225,8 @@ class VanguardETFCollector(BaseCollector):
                         By.XPATH, 
                         '//button[contains(., "Download") and contains(., "prices")]'
                     )
-                    self.logger.info("Found download button with original selector")
                 except:
-                    self.logger.info("Original download button selector failed")
-                
-                # Debug: List all download-related elements on the page after navigation
-                try:
-                    all_download_elements = driver.find_elements(By.XPATH, '//*[contains(text(), "Download") or contains(text(), "download")]')
-                    self.logger.info(f"Found {len(all_download_elements)} elements containing 'Download':")
-                    for i, elem in enumerate(all_download_elements[:15]):  # Check more elements
-                        try:
-                            elem_text = elem.text.strip()
-                            if elem_text:
-                                self.logger.info(f"  {i}: '{elem_text}' (tag: {elem.tag_name})")
-                                # Look for price-related text
-                                if "price" in elem_text.lower():
-                                    self.logger.info(f"    ✓ Element {i} contains 'price': '{elem_text}'")
-                        except:
-                            self.logger.info(f"  {i}: [Could not get text] (tag: {elem.tag_name})")
-                    
-                    # Also look for elements containing both Download and numbers (price count)
-                    price_download_elements = driver.find_elements(By.XPATH, '//*[contains(text(), "Download") and contains(text(), "price")]')
-                    self.logger.info(f"Found {len(price_download_elements)} elements containing both 'Download' and 'price':")
-                    for i, elem in enumerate(price_download_elements):
-                        try:
-                            self.logger.info(f"  Price download {i}: '{elem.text}' (tag: {elem.tag_name})")
-                        except:
-                            self.logger.info(f"  Price download {i}: [Could not get text] (tag: {elem.tag_name})")
-                            
-                except Exception as e:
-                    self.logger.info(f"Could not list download elements: {e}")
+                    pass
                 
                 # Try specific selectors for price download button
                 if not download_button:
@@ -299,13 +246,6 @@ class VanguardETFCollector(BaseCollector):
                     for selector in selectors:
                         try:
                             download_button = driver.find_element(By.XPATH, selector)
-                            self.logger.info(f"Found download element with selector: {selector}")
-                            self.logger.info(f"Element text: '{download_button.text}'")
-                            # Verify this is the prices download button
-                            if "prices" in download_button.text.lower():
-                                self.logger.info("✓ Confirmed this is the prices download button")
-                            else:
-                                self.logger.info("⚠ This might not be the prices download button")
                             break
                         except:
                             continue
@@ -347,11 +287,6 @@ class VanguardETFCollector(BaseCollector):
                 df = pd.read_excel(downloaded_file, skiprows=8)
                 df = df.dropna(how='all')
                 
-                # Debug: Log DataFrame structure before column assignment
-                self.logger.info(f"DataFrame shape after reading: {df.shape}")
-                self.logger.info(f"DataFrame columns: {list(df.columns)}")
-                if len(df) > 0:
-                    self.logger.info(f"Sample data (first row): {df.iloc[0].tolist()}")
                 
                 # Validate DataFrame has expected number of columns
                 if df.shape[1] < 3:
@@ -359,38 +294,24 @@ class VanguardETFCollector(BaseCollector):
                     self.logger.error(f"Available columns: {list(df.columns)}")
                     
                     # Try alternative parsing strategies
-                    self.logger.info("Trying alternative parsing strategies with different skiprows...")
                     for skip_rows in [0, 1, 2, 5, 6, 7, 9, 10]:
                         try:
                             df_alt = pd.read_excel(downloaded_file, skiprows=skip_rows)
                             df_alt = df_alt.dropna(how='all')
-                            self.logger.info(f"skiprows={skip_rows}: shape={df_alt.shape}, columns={list(df_alt.columns)}")
                             if df_alt.shape[1] >= 3:
-                                self.logger.info(f"Found 3+ columns with skiprows={skip_rows}")
                                 df = df_alt
                                 break
                         except Exception as e:
-                            self.logger.info(f"skiprows={skip_rows} failed: {str(e)}")
                             continue
                     
                     # If still insufficient columns, file format may have changed
                     if df.shape[1] < 3:
                         raise ValueError(f"Cannot parse Excel file: expected at least 3 columns (Date, NAV, Market Price) but found {df.shape[1]} columns. The file format may have changed.")
                 
-                # Debug: Log final DataFrame structure before column selection
-                self.logger.info(f"Final DataFrame shape before column selection: {df.shape}")
-                self.logger.info(f"Final DataFrame columns before selection: {list(df.columns)}")
-                
                 # Take only the first 3 columns (in case there are extra columns)
-                if df.shape[1] > 3:
-                    self.logger.info(f"DataFrame has {df.shape[1]} columns, taking only first 3")
                 df = df.iloc[:, :3]
                 
-                # Debug: Log after column selection
-                self.logger.info(f"After column selection: shape={df.shape}, columns={list(df.columns)}")
-                
                 df.columns = ['Date', 'NAV_GBP', 'Market_Price_GBP']
-                self.logger.info(f"After column renaming: columns={list(df.columns)}")
                 
                 # Clean and convert data
                 try:
@@ -416,9 +337,6 @@ class VanguardETFCollector(BaseCollector):
                     
                 except Exception as e:
                     self.logger.error(f"Error cleaning data: {str(e)}")
-                    self.logger.error(f"Data types: {df.dtypes}")
-                    if len(df) > 0:
-                        self.logger.error(f"Sample problematic data: {df.iloc[0]}")
                     raise
                 
                 # Add ETF metadata
