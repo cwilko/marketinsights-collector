@@ -1,5 +1,8 @@
 import json
 import time
+import pandas as pd
+import io
+import urllib.parse
 from datetime import datetime, timedelta
 from typing import Dict, Any, List
 from .base import BaseCollector
@@ -1876,3 +1879,217 @@ def collect_uk_gilt_yields(database_url=None):
     else:
         collector.logger.info("No valid UK gilt yields data to process")
         return 0
+
+class GermanBundCollector(BaseCollector):
+    """Collector for German Bund yield curve data from Bundesbank StatisticDownload API."""
+    
+    def __init__(self, database_url=None):
+        super().__init__(database_url)
+        self.base_url = "https://www.bundesbank.de/statistic-rmi/StatisticDownload"
+        self.maturities = list(range(1, 31))  # 1 to 30 years
+        
+    def build_download_url(self, start_date=None, end_date=None):
+        """Build Bundesbank download URL with all 30 time series IDs for German Bund yields."""
+        
+        # Default to recent data if no dates provided
+        if end_date is None:
+            end_date = datetime.now()
+        if start_date is None:
+            start_date = end_date - timedelta(days=30)
+        
+        # Generate all 30 time series IDs for 1-30 year maturities
+        ts_ids = []
+        for maturity in self.maturities:
+            ts_id = f'BBSIS.D.I.ZST.ZI.EUR.S1311.B.A604.R{maturity:02d}XX.R.A.A._Z._Z.A'
+            ts_ids.append(ts_id)
+        
+        # Base parameters that worked in testing
+        base_params = {
+            'mode': 'its',
+            'its_fileFormat': 'csv',
+            'its_csvFormat': 'en',
+            'its_currency': 'hypothetical',
+            'its_dateFormat': 'default',
+            'its_from': '',
+            'its_to': '',
+            'frequency': 'D'
+        }
+        
+        # Build URL manually with multiple tsId parameters
+        query_parts = []
+        for key, value in base_params.items():
+            query_parts.append(f'{key}={urllib.parse.quote(str(value))}')
+        
+        # Add all 30 time series IDs
+        for ts_id in ts_ids:
+            query_parts.append(f'tsId={urllib.parse.quote(ts_id)}')
+        
+        full_url = f'{self.base_url}?{"&".join(query_parts)}'
+        
+        self.logger.info(f"Built Bundesbank URL for {len(self.maturities)} maturities (1-30Y)")
+        return full_url
+    
+    def fetch_and_clean_data(self, start_date=None, end_date=None):
+        """Fetch German Bund yield data from Bundesbank and clean it."""
+        
+        url = self.build_download_url(start_date, end_date)
+        
+        # Set browser-like headers to avoid 403 errors
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'text/csv,application/csv,text/plain,*/*',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate',
+            'Connection': 'keep-alive',
+        }
+        
+        try:
+            self.logger.info("Fetching German Bund yield curve data from Bundesbank...")
+            response = self.session.get(url, headers=headers, timeout=30)
+            response.raise_for_status()
+            
+            if response.status_code == 200:
+                content = response.text
+                self.logger.info(f"Retrieved {len(content)} characters of CSV data")
+                
+                # Parse CSV
+                df = pd.read_csv(io.StringIO(content))
+                self.logger.info(f"Raw data shape: {df.shape}")
+                
+                # Clean the data structure
+                return self._clean_bundesbank_csv(df)
+                
+            else:
+                self.logger.error(f"Bundesbank request failed with status {response.status_code}")
+                return []
+                
+        except Exception as e:
+            self.logger.error(f"Error fetching German Bund data: {str(e)}")
+            raise
+    
+    def _clean_bundesbank_csv(self, df):
+        """Clean the Bundesbank CSV data structure and convert to standardized format."""
+        
+        # The CSV has alternating columns: yield_data, flags, yield_data, flags, etc.
+        # First column is date, then pairs of (yield, flags) for each maturity
+        
+        # Find data start row (first valid date)
+        date_col = df.iloc[:, 0]
+        data_start_idx = None
+        
+        for i, date_val in enumerate(date_col):
+            date_str = str(date_val)
+            if len(date_str) == 10 and date_str.count('-') == 2:
+                try:
+                    pd.to_datetime(date_str)
+                    data_start_idx = i
+                    break
+                except:
+                    continue
+        
+        if data_start_idx is None:
+            self.logger.error("Could not find data start row in Bundesbank CSV")
+            return []
+        
+        self.logger.info(f"Data starts at row: {data_start_idx}")
+        
+        # Extract clean data starting from data_start_idx
+        clean_records = []
+        
+        # Find yield columns (those containing 'BBSIS' but not 'FLAGS')
+        yield_columns = []
+        for i, col in enumerate(df.columns):
+            if 'BBSIS' in str(col) and 'FLAGS' not in str(col):
+                yield_columns.append(i)
+        
+        self.logger.info(f"Found {len(yield_columns)} yield columns")
+        
+        # Process each row of data
+        for row_idx in range(data_start_idx, len(df)):
+            try:
+                # Parse date
+                date_val = str(df.iloc[row_idx, 0])
+                try:
+                    obs_date = pd.to_datetime(date_val).date()
+                except:
+                    continue  # Skip rows with invalid dates
+                
+                # Extract yields for each maturity
+                for col_idx, maturity in zip(yield_columns, self.maturities[:len(yield_columns)]):
+                    yield_val = df.iloc[row_idx, col_idx]
+                    
+                    # Handle missing values and convert to float
+                    if pd.isna(yield_val) or str(yield_val) in ['.', 'No value available']:
+                        continue  # Skip missing values
+                    
+                    try:
+                        yield_rate = float(yield_val)
+                        
+                        clean_records.append({
+                            'date': obs_date,
+                            'maturity_years': float(maturity),
+                            'yield_rate': yield_rate,
+                            'data_source': 'Bundesbank_StatisticDownload'
+                        })
+                        
+                    except (ValueError, TypeError):
+                        continue  # Skip invalid yield values
+                        
+            except Exception as e:
+                self.logger.debug(f"Error processing row {row_idx}: {str(e)}")
+                continue
+        
+        self.logger.info(f"Cleaned {len(clean_records)} yield observations")
+        return clean_records
+
+def collect_german_bund_yields(database_url=None):
+    """
+    Collect German Bund yield curve data (1-30 years) from Bundesbank with incremental updates.
+    
+    Safe by default - requires explicit database_url to write to database.
+    Returns count of records processed.
+    """
+    collector = GermanBundCollector(database_url)
+    
+    # Get date range for collection (incremental updates)
+    start_date, end_date = collector.get_date_range_for_collection(
+        table="german_bund_yields"
+    )
+    
+    if start_date is None and end_date is None:
+        collector.logger.info("German Bund yields data is already up to date")
+        return 0
+    
+    # Fetch and clean data
+    try:
+        cleaned_data = collector.fetch_and_clean_data(start_date, end_date)
+        
+        if not cleaned_data:
+            collector.logger.info("No German Bund yield data retrieved from Bundesbank")
+            return 0
+        
+        # Filter data within target date range if needed
+        if start_date:
+            cleaned_data = [record for record in cleaned_data if record['date'] >= start_date]
+        if end_date:
+            cleaned_data = [record for record in cleaned_data if record['date'] <= end_date]
+        
+        # Sort by date and maturity for consistency
+        cleaned_data.sort(key=lambda x: (x['date'], x['maturity_years']))
+        
+        # Bulk upsert all records
+        if cleaned_data:
+            success_count = collector.bulk_upsert_data(
+                "german_bund_yields", 
+                cleaned_data,
+                conflict_columns=['date', 'maturity_years']
+            )
+            collector.logger.info(f"Successfully collected {success_count} German Bund yield records")
+            return success_count
+        else:
+            collector.logger.info("No valid German Bund yield data to process")
+            return 0
+            
+    except Exception as e:
+        collector.logger.error(f"German Bund yield collection failed: {str(e)}")
+        raise

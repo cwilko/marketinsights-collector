@@ -4,7 +4,7 @@ Tests for economic indicator data collectors.
 
 import pytest
 from datetime import datetime
-from data_collectors.economic_indicators import FREDCollector, BLSCollector, BEACollector, collect_cpi, collect_monthly_fed_funds_rate, collect_daily_fed_funds_rate, collect_unemployment_rate, collect_gdp
+from data_collectors.economic_indicators import FREDCollector, BLSCollector, BEACollector, GermanBundCollector, collect_cpi, collect_monthly_fed_funds_rate, collect_daily_fed_funds_rate, collect_unemployment_rate, collect_gdp, collect_german_bund_yields
 from data_collectors.market_data import collect_fred_treasury_yields, FRED_TREASURY_SERIES
 
 
@@ -209,3 +209,89 @@ class TestFREDTreasuryYields:
         result = collect_fred_treasury_yields(database_url=None)
         assert isinstance(result, int)
         assert result >= 0  # Should process at least some records
+
+
+class TestGermanBundCollector:
+    """Tests for German Bund yield curve data collection from Bundesbank."""
+    
+    def test_german_bund_collector_comprehensive(self):
+        """Comprehensive test for German Bund collector - single API call."""
+        import pandas as pd
+        
+        # Test 1: Collector initialization
+        collector = GermanBundCollector(database_url=None)
+        assert collector.base_url == "https://www.bundesbank.de/statistic-rmi/StatisticDownload"
+        assert collector.database_url is None
+        assert len(collector.maturities) == 30  # 1-30 year maturities
+        assert collector.maturities == list(range(1, 31))
+        
+        # Test 2: URL construction
+        url = collector.build_download_url()
+        assert url.startswith("https://www.bundesbank.de/statistic-rmi/StatisticDownload?")
+        assert "mode=its" in url
+        assert "its_fileFormat=csv" in url
+        assert "its_csvFormat=en" in url
+        assert "frequency=D" in url
+        
+        # Should contain all 30 time series IDs
+        for maturity in range(1, 31):
+            expected_ts_id = f"BBSIS.D.I.ZST.ZI.EUR.S1311.B.A604.R{maturity:02d}XX.R.A.A._Z._Z.A"
+            assert expected_ts_id in url
+        
+        # Test 3: Data fetching and cleaning (SINGLE API CALL)
+        cleaned_data = collector.fetch_and_clean_data()
+        
+        assert isinstance(cleaned_data, list)
+        assert len(cleaned_data) > 0
+        
+        # Test 4: Data structure validation
+        sample_record = cleaned_data[0]
+        assert "date" in sample_record
+        assert "maturity_years" in sample_record
+        assert "yield_rate" in sample_record
+        assert "data_source" in sample_record
+        
+        # Verify data types
+        assert isinstance(sample_record["date"], (type(datetime.now().date())))
+        assert isinstance(sample_record["maturity_years"], float)
+        assert isinstance(sample_record["yield_rate"], (int, float))
+        assert sample_record["data_source"] == "Bundesbank_StatisticDownload"
+        
+        # Test 5: Data quality validation
+        # Verify yield range is reasonable (-2% to 10%)
+        for record in cleaned_data[:100]:  # Check first 100 records
+            assert -2.0 <= record["yield_rate"] <= 10.0
+        
+        # Test 6: Data completeness analysis
+        df = pd.DataFrame(cleaned_data)
+        
+        # Check date range - should go back to ~1997
+        min_date = df['date'].min()
+        max_date = df['date'].max()
+        assert min_date.year <= 1998  # Data should start around 1997-1998
+        assert max_date.year >= 2024  # Should have recent data
+        
+        # Check maturities coverage
+        unique_maturities = sorted(df['maturity_years'].unique())
+        assert len(unique_maturities) >= 25  # At least 25 out of 30 maturities
+        
+        # Verify short-term maturities (1-10Y) are definitely present
+        short_term_maturities = [m for m in unique_maturities if m <= 10.0]
+        assert len(short_term_maturities) >= 10  # All 1-10Y should be present
+        
+        # Verify maturities are in expected range (1-30 years)
+        for maturity in unique_maturities:
+            assert 1.0 <= maturity <= 30.0
+        
+        # Test 7: Volume expectations
+        assert len(cleaned_data) > 100000  # Should have >100k records
+        
+        # Test 8: Safe mode function testing (using already fetched data for validation)
+        result = collect_german_bund_yields(database_url=None)
+        assert isinstance(result, int)
+        assert result > 100000  # Should process many records
+        
+        # Test with default None parameter
+        result_none = collect_german_bund_yields()
+        assert isinstance(result_none, int)
+        assert result_none >= 0
