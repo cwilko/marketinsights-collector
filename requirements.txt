@@ -1,7 +1,0 @@
-# Production dependencies for the marketinsights-collector package
-# Install the package itself in editable mode for development
--e .
-
-# Optional analysis dependencies  
-pandas>=2.0.0
-python-dotenv>=1.0.0

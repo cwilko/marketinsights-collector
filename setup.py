@@ -11,6 +11,7 @@ setup(
         "psycopg2-binary>=2.9.0",
         "beautifulsoup4>=4.12.0",
         "lxml>=4.9.0",
+        "pandas>=2.0.0",
     ],
     extras_require={
         "selenium": [
