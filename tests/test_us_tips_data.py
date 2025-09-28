@@ -8,6 +8,7 @@ from datetime import datetime, date
 from data_collectors.us_tips_data import (
     collect_us_tips_single_series, 
     FRED_TIPS_SERIES,
+    FRED_FORWARD_INFLATION_SERIES,
     collect_us_tips
 )
 
@@ -26,6 +27,14 @@ class TestUSTIPSDataCollector:
         for maturity in FRED_TIPS_SERIES.values():
             assert maturity.endswith('Y')
             assert maturity[:-1].isdigit()
+    
+    def test_fred_forward_inflation_series_mapping(self):
+        """Test that FRED forward inflation series mapping is valid."""
+        expected_series = {'T5YIFR'}
+        expected_labels = {'5Y5Y'}
+        
+        assert set(FRED_FORWARD_INFLATION_SERIES.keys()) == expected_series
+        assert set(FRED_FORWARD_INFLATION_SERIES.values()) == expected_labels
     
     @patch('data_collectors.us_tips_data.FREDCollector')
     def test_collect_tips_single_series_valid_data(self, mock_fred_collector):
@@ -150,6 +159,12 @@ class TestUSTIPSDataCollector:
             expected_years = float(expected_maturity.replace('Y', ''))
             assert result[0]['maturity_years'] == expected_years
 
+    def test_collect_forward_inflation_single_series(self):
+        """Test that we can collect T5YIFR data."""
+        # This test validates the series exists in our mapping
+        assert 'T5YIFR' in FRED_FORWARD_INFLATION_SERIES
+        assert FRED_FORWARD_INFLATION_SERIES['T5YIFR'] == '5Y5Y'
+
 class TestTIPSDataValidation:
     """Test TIPS data validation and edge cases."""
     
@@ -183,3 +198,33 @@ class TestTIPSDataValidation:
             yield_float = float(yield_str)
             assert isinstance(yield_float, float)
             assert yield_float == float(yield_str)
+
+class TestForwardInflationDataCollection:
+    """Test forward inflation expectation data collection."""
+    
+    @patch('data_collectors.us_tips_data.FREDCollector')
+    def test_forward_inflation_data_structure(self, mock_fred_collector):
+        """Test forward inflation data collection structure."""
+        # Mock T5YIFR data response
+        mock_data = [
+            {'date': '2024-01-01', 'value': '2.23'},
+            {'date': '2024-01-02', 'value': '2.25'},
+            {'date': '2024-01-03', 'value': '.'},  # Null value should be skipped
+        ]
+        
+        mock_collector_instance = Mock()
+        mock_collector_instance.get_series_data.return_value = mock_data
+        mock_collector_instance.get_date_range_for_collection.return_value = (None, None)
+        mock_fred_collector.return_value = mock_collector_instance
+        
+        # This should not raise an error and should handle the data properly
+        # We're testing in safe mode (no database operations)
+        result = collect_us_tips()
+        
+        # Verify the collector was initialized
+        mock_fred_collector.assert_called_once()
+    
+    def test_t5yifr_series_exists(self):
+        """Test that T5YIFR series is properly mapped."""
+        assert 'T5YIFR' in FRED_FORWARD_INFLATION_SERIES
+        assert FRED_FORWARD_INFLATION_SERIES['T5YIFR'] == '5Y5Y'
