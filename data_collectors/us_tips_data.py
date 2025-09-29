@@ -83,16 +83,12 @@ def collect_us_tips(database_url=None):
                 continue
         
         if bulk_data:
-            # Bulk insert with ON CONFLICT handling
-            insert_sql = """
-            INSERT INTO us_tips_yields (date, maturity, maturity_years, yield_rate)
-            VALUES (%(date)s, %(maturity)s, %(maturity_years)s, %(yield_rate)s)
-            ON CONFLICT (date, maturity) DO UPDATE SET
-                yield_rate = EXCLUDED.yield_rate,
-                created_at = CURRENT_TIMESTAMP
-            """
-            
-            inserted = collector.bulk_insert(insert_sql, bulk_data)
+            # Bulk upsert with conflict resolution
+            inserted = collector.bulk_upsert_data(
+                table="us_tips_yields",
+                data_list=bulk_data,
+                conflict_columns=["date", "maturity"]
+            )
             total_inserted += inserted
             
             collector.logger.info(f"Inserted {inserted} records for TIPS {maturity}")
@@ -137,16 +133,12 @@ def collect_us_tips(database_url=None):
                 continue
         
         if bulk_data:
-            # Bulk insert with ON CONFLICT handling
-            insert_sql = """
-            INSERT INTO us_forward_inflation_expectations (date, maturity_label, expectation_rate, series_id)
-            VALUES (%(date)s, %(maturity_label)s, %(expectation_rate)s, %(series_id)s)
-            ON CONFLICT (date, series_id) DO UPDATE SET
-                expectation_rate = EXCLUDED.expectation_rate,
-                created_at = CURRENT_TIMESTAMP
-            """
-            
-            inserted = collector.bulk_insert(insert_sql, bulk_data)
+            # Bulk upsert with conflict resolution
+            inserted = collector.bulk_upsert_data(
+                table="us_forward_inflation_expectations", 
+                data_list=bulk_data,
+                conflict_columns=["date", "series_id"]
+            )
             total_inserted += inserted
             
             collector.logger.info(f"Inserted {inserted} records for forward inflation {maturity_label}")
