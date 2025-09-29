@@ -745,6 +745,114 @@ def collect_gdp(database_url=None):
         collector.logger.info("No valid GDP data to process")
         return 0
 
+def collect_real_gdp_growth_components(database_url=None):
+    """Collect Real GDP growth rate and its components from FRED."""
+    collector = FREDCollector(database_url)
+    
+    # Get date range for collection
+    start_date, end_date = collector.get_date_range_for_collection(
+        table="real_gdp_growth_components"
+    )
+    
+    if start_date is None and end_date is None:
+        collector.logger.info("Real GDP growth components data is already up to date")
+        return 0
+    
+    # FRED series IDs for Real GDP growth rate and components
+    gdp_series = {
+        "real_gdp_growth": "A191RL1Q225SBEA",  # Real Gross Domestic Product (percent change)
+        "consumption_contribution": "DPCERY2Q224SBEA",  # Personal consumption expenditures contribution
+        "investment_contribution": "A006RY2Q224SBEA",   # Gross private domestic investment contribution
+        "government_contribution": "A822RY2Q224SBEA",   # Government expenditures contribution
+        "net_exports_contribution": "A019RY2Q224SBEA"   # Net exports contribution
+    }
+    
+    # Collect data for each series
+    all_data = {}
+    for component, series_id in gdp_series.items():
+        try:
+            collector.logger.info(f"Fetching {component} data from FRED series {series_id}")
+            
+            # Handle unlimited historical data fetch
+            if start_date is None:
+                # Fetch all available historical data
+                series_data = collector.get_series_data(
+                    series_id, 
+                    observation_end=end_date.strftime("%Y-%m-%d")
+                )
+            else:
+                # Fetch data with date range
+                series_data = collector.get_series_data(
+                    series_id, 
+                    observation_start=start_date.strftime("%Y-%m-%d"),
+                    observation_end=end_date.strftime("%Y-%m-%d")
+                )
+            
+            # Process the data
+            processed_data = []
+            for item in series_data:
+                try:
+                    if item["value"] == ".":
+                        continue  # Skip missing values
+                        
+                    # Parse date and convert to quarter end date
+                    obs_date = datetime.strptime(item["date"], "%Y-%m-%d").date()
+                    
+                    # Only process data within target date range
+                    if (start_date and obs_date < start_date) or obs_date > end_date:
+                        continue
+                    
+                    processed_data.append({
+                        "date": obs_date,
+                        "value": float(item["value"])
+                    })
+                        
+                except Exception as e:
+                    collector.logger.error(f"Error processing {component} data item: {str(e)}")
+            
+            all_data[component] = processed_data
+            collector.logger.info(f"Retrieved {len(processed_data)} observations for {component}")
+            
+        except Exception as e:
+            collector.logger.error(f"Failed to fetch {component} data: {str(e)}")
+            all_data[component] = []
+    
+    # Combine all series data by date
+    combined_data = {}
+    for component, data_list in all_data.items():
+        for record in data_list:
+            date_key = record["date"]
+            if date_key not in combined_data:
+                combined_data[date_key] = {"date": date_key}
+            combined_data[date_key][component] = record["value"]
+    
+    # Prepare bulk data for database insertion
+    bulk_data = []
+    for date_key, record in combined_data.items():
+        # Only include records that have the main GDP growth rate
+        if "real_gdp_growth" in record:
+            data = {
+                "date": record["date"],
+                "real_gdp_growth": record.get("real_gdp_growth"),
+                "consumption_contribution": record.get("consumption_contribution"),
+                "investment_contribution": record.get("investment_contribution"), 
+                "government_contribution": record.get("government_contribution"),
+                "net_exports_contribution": record.get("net_exports_contribution")
+            }
+            bulk_data.append(data)
+    
+    # Sort by date for consistency
+    bulk_data.sort(key=lambda x: x["date"])
+    
+    # Bulk upsert all records
+    if bulk_data:
+        success_count = collector.bulk_upsert_data("real_gdp_growth_components", bulk_data, conflict_columns=["date"])
+        collector.logger.info(f"Successfully bulk upserted {success_count} real GDP growth component records")
+        return success_count
+    else:
+        collector.logger.info("No valid real GDP growth component data to process")
+        return 0
+
 # UK Data Collection Functions
 
 def collect_uk_cpi(database_url=None):

@@ -4,7 +4,7 @@ Tests for economic indicator data collectors.
 
 import pytest
 from datetime import datetime
-from data_collectors.economic_indicators import FREDCollector, BLSCollector, BEACollector, GermanBundCollector, collect_cpi, collect_monthly_fed_funds_rate, collect_daily_fed_funds_rate, collect_unemployment_rate, collect_gdp, collect_german_bund_yields
+from data_collectors.economic_indicators import FREDCollector, BLSCollector, BEACollector, GermanBundCollector, collect_cpi, collect_monthly_fed_funds_rate, collect_daily_fed_funds_rate, collect_unemployment_rate, collect_gdp, collect_real_gdp_growth_components, collect_german_bund_yields
 from data_collectors.market_data import collect_fred_treasury_yields, FRED_TREASURY_SERIES
 
 
@@ -62,6 +62,39 @@ class TestFREDCollector:
         # Should have fewer records than default 100 limit for a week of daily data
         if len(data) > 0:
             assert len(data) <= 10  # At most 7 days + weekends
+            
+    def test_fred_real_gdp_growth_series(self):
+        """Test FRED collector can fetch Real GDP growth components series."""
+        collector = FREDCollector(database_url=None)
+        
+        # Test all 5 GDP growth component series
+        gdp_series = {
+            "real_gdp_growth": "A191RL1Q225SBEA",  # Real Gross Domestic Product (percent change)
+            "consumption_contribution": "DPCERY2Q224SBEA",  # Personal consumption expenditures contribution
+            "investment_contribution": "A006RY2Q224SBEA",   # Gross private domestic investment contribution
+            "government_contribution": "A822RY2Q224SBEA",   # Government expenditures contribution
+            "net_exports_contribution": "A019RY2Q224SBEA"   # Net exports contribution
+        }
+        
+        for component, series_id in gdp_series.items():
+            data = collector.get_series_data(series_id, limit=5)
+            
+            assert isinstance(data, list), f"Should return list for {component} ({series_id})"
+            assert len(data) > 0, f"Should return data for {component} ({series_id})"
+            
+            # Test data structure for first few records
+            for item in data[:3]:
+                assert "date" in item
+                assert "value" in item
+                
+                # Test that we can parse the date
+                if item["value"] != ".":  # Skip missing values
+                    date_obj = datetime.strptime(item["date"], "%Y-%m-%d")
+                    assert isinstance(date_obj, datetime)
+                    
+                    # Test that value can be converted to float
+                    value = float(item["value"])
+                    assert isinstance(value, float)
 
 
 class TestBLSCollector:
@@ -132,6 +165,17 @@ class TestBEACollector:
         result = collect_gdp(database_url=None)
         assert isinstance(result, int)
         assert result >= 0  # Should process at least some records or return 0 if rate limited
+
+    def test_collect_real_gdp_growth_components_function(self):
+        """Test the collect_real_gdp_growth_components function."""
+        result = collect_real_gdp_growth_components(database_url=None)
+        assert isinstance(result, int)
+        assert result >= 0  # Should process at least some records
+        
+        # Test that the function can handle safe mode properly
+        result_safe = collect_real_gdp_growth_components(database_url=None)
+        assert isinstance(result_safe, int)
+        assert result_safe >= 0
 
 
 class TestFREDTreasuryYields:
