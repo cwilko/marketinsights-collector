@@ -764,7 +764,8 @@ def collect_real_gdp_growth_components(database_url=None):
         "consumption_contribution": "DPCERY2Q224SBEA",  # Personal consumption expenditures contribution
         "investment_contribution": "A006RY2Q224SBEA",   # Gross private domestic investment contribution
         "government_contribution": "A822RY2Q224SBEA",   # Government expenditures contribution
-        "net_exports_contribution": "A019RY2Q224SBEA"   # Net exports contribution
+        "net_exports_contribution": "A019RY2Q224SBEA",  # Net exports contribution
+        "gdp_now_forecast": "GDPNOW"  # GDPNow forecast from Atlanta Fed
     }
     
     # Collect data for each series
@@ -837,7 +838,8 @@ def collect_real_gdp_growth_components(database_url=None):
                 "consumption_contribution": record.get("consumption_contribution"),
                 "investment_contribution": record.get("investment_contribution"), 
                 "government_contribution": record.get("government_contribution"),
-                "net_exports_contribution": record.get("net_exports_contribution")
+                "net_exports_contribution": record.get("net_exports_contribution"),
+                "gdp_now_forecast": record.get("gdp_now_forecast")
             }
             bulk_data.append(data)
     
