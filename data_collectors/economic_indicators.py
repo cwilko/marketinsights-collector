@@ -750,8 +750,8 @@ def collect_gdpnow_forecasts(database_url=None):
     Collect GDPNow real-time GDP growth forecasts from Atlanta Fed (FRED series GDPNOW).
     
     Note: GDPNow forecasts are updated multiple times throughout the month with revisions
-    for the same quarter. This function ALWAYS fetches recent data (bypassing incremental
-    update logic) to ensure we capture the latest forecast revisions.
+    for the same quarter. This function uses incremental updates but with a 6-month buffer
+    to ensure we capture the latest forecast revisions for existing quarters.
     
     Args:
         database_url (str, optional): Database connection URL. If None, no data is saved.
@@ -765,17 +765,35 @@ def collect_gdpnow_forecasts(database_url=None):
         # Safe mode - just test the connection and return
         collector.logger.info("Running in safe mode - no database operations")
     
-    # ALWAYS fetch the last 2 years of GDPNOW data (no incremental updates)
-    # GDPNow forecasts are revised multiple times per month, so we need to
-    # capture the latest revisions rather than using incremental logic
-    from datetime import timedelta
-    end_date = datetime.now().date()
-    start_date = end_date - timedelta(days=2*365)  # 2 years back
+    # Get date range for collection
+    start_date, end_date = collector.get_date_range_for_collection(
+        table="gdpnow_forecasts"
+    )
     
-    collector.logger.info("GDPNow collection: Bypassing incremental updates - always fetching recent data for forecast revisions")
+    if start_date is None and end_date is None:
+        collector.logger.info("GDPNow forecast data is already up to date")
+        return 0
+    
+    # Handle date range logic for GDPNow forecasts
+    from datetime import timedelta
+    
+    if start_date is None:
+        # First time collection - get all available data
+        # Fetch last 10 years to get full historical dataset
+        end_date = datetime.now().date()
+        start_date = end_date - timedelta(days=10*365)
+        collector.logger.info("GDPNow collection: First time collection - fetching all historical data")
+    else:
+        # Incremental collection with 6-month buffer for forecast revisions
+        # GDPNow forecasts are revised multiple times per month, so we need
+        # to go back 6 months to capture revisions for existing quarters
+        original_start_date = start_date
+        start_date = start_date - timedelta(days=6*30)  # 6 months back
+        collector.logger.info(f"GDPNow collection: Incremental update with 6-month buffer - fetching from {start_date} (original: {original_start_date})")
     
     try:
         collector.logger.info(f"Fetching GDPNow forecast data from FRED series GDPNOW")
+        collector.logger.info(f"Date range: {start_date} to {end_date}")
         
         series_data = collector.get_series_data(
             "GDPNOW",
@@ -783,7 +801,6 @@ def collect_gdpnow_forecasts(database_url=None):
             observation_end=end_date.strftime("%Y-%m-%d")
         )
         
-        collector.logger.info(f"GDPNow: Fetching from {start_date} to {end_date}")
         collector.logger.info(f"Retrieved {len(series_data)} raw observations for GDPNow")
         
         # Process the forecast data
