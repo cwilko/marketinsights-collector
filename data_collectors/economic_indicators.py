@@ -777,7 +777,7 @@ def collect_real_gdp_growth_components(database_url=None):
             # Special handling for GDPNOW to ensure we get the latest data
             if series_id == "GDPNOW":
                 # Always fetch the last 2 years of GDPNOW data to capture latest forecasts
-                from datetime import datetime, timedelta
+                from datetime import timedelta
                 forecast_end_date = datetime.now().date()
                 forecast_start_date = forecast_end_date - timedelta(days=2*365)  # 2 years back
                 
