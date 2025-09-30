@@ -745,6 +745,73 @@ def collect_gdp(database_url=None):
         collector.logger.info("No valid GDP data to process")
         return 0
 
+def collect_gdpnow_forecasts(database_url=None):
+    """
+    Collect GDPNow real-time GDP growth forecasts from Atlanta Fed (FRED series GDPNOW).
+    
+    Args:
+        database_url (str, optional): Database connection URL. If None, no data is saved.
+    
+    Returns:
+        int: Number of records processed
+    """
+    collector = FREDCollector(database_url)
+    
+    if database_url is None:
+        # Safe mode - just test the connection and return
+        collector.logger.info("Running in safe mode - no database operations")
+    
+    # Always fetch the last 2 years of GDPNOW data to capture latest forecasts
+    from datetime import timedelta
+    end_date = datetime.now().date()
+    start_date = end_date - timedelta(days=2*365)  # 2 years back
+    
+    try:
+        collector.logger.info(f"Fetching GDPNow forecast data from FRED series GDPNOW")
+        
+        series_data = collector.get_series_data(
+            "GDPNOW",
+            observation_start=start_date.strftime("%Y-%m-%d"),
+            observation_end=end_date.strftime("%Y-%m-%d")
+        )
+        
+        collector.logger.info(f"GDPNow: Fetching from {start_date} to {end_date}")
+        collector.logger.info(f"Retrieved {len(series_data)} raw observations for GDPNow")
+        
+        # Process the forecast data
+        processed_data = []
+        for item in series_data:
+            try:
+                if item["value"] == ".":
+                    continue  # Skip missing values
+                    
+                # Parse date
+                obs_date = datetime.strptime(item["date"], "%Y-%m-%d").date()
+                
+                processed_data.append({
+                    "date": obs_date,
+                    "forecast_rate": float(item["value"]),
+                    "data_source": "Atlanta_Fed_GDPNow"
+                })
+                        
+            except Exception as e:
+                collector.logger.error(f"Error processing GDPNow forecast data item: {str(e)}")
+        
+        collector.logger.info(f"Processed {len(processed_data)} valid GDPNow forecast observations")
+        
+        # Bulk upsert to gdpnow_forecasts table
+        if processed_data:
+            success_count = collector.bulk_upsert_data("gdpnow_forecasts", processed_data, conflict_columns=["date"])
+            collector.logger.info(f"Successfully bulk upserted {success_count} GDPNow forecast records")
+            return success_count
+        else:
+            collector.logger.info("No valid GDPNow forecast data to process")
+            return 0
+            
+    except Exception as e:
+        collector.logger.error(f"Failed to fetch GDPNow forecast data: {str(e)}")
+        return 0
+
 def collect_real_gdp_growth_components(database_url=None):
     """Collect Real GDP growth rate and its components from FRED."""
     collector = FREDCollector(database_url)
@@ -764,8 +831,7 @@ def collect_real_gdp_growth_components(database_url=None):
         "consumption_contribution": "DPCERY2Q224SBEA",  # Personal consumption expenditures contribution
         "investment_contribution": "A006RY2Q224SBEA",   # Gross private domestic investment contribution
         "government_contribution": "A822RY2Q224SBEA",   # Government expenditures contribution
-        "net_exports_contribution": "A019RY2Q224SBEA",  # Net exports contribution
-        "gdp_now_forecast": "GDPNOW"  # GDPNow forecast from Atlanta Fed
+        "net_exports_contribution": "A019RY2Q224SBEA"   # Net exports contribution
     }
     
     # Collect data for each series
@@ -774,34 +840,20 @@ def collect_real_gdp_growth_components(database_url=None):
         try:
             collector.logger.info(f"Fetching {component} data from FRED series {series_id}")
             
-            # Special handling for GDPNOW to ensure we get the latest data
-            if series_id == "GDPNOW":
-                # Always fetch the last 2 years of GDPNOW data to capture latest forecasts
-                from datetime import timedelta
-                forecast_end_date = datetime.now().date()
-                forecast_start_date = forecast_end_date - timedelta(days=2*365)  # 2 years back
-                
+            # Handle GDP components with existing date range logic
+            if start_date is None:
+                # Fetch all available historical data
                 series_data = collector.get_series_data(
-                    series_id,
-                    observation_start=forecast_start_date.strftime("%Y-%m-%d"),
-                    observation_end=forecast_end_date.strftime("%Y-%m-%d")
+                    series_id, 
+                    observation_end=end_date.strftime("%Y-%m-%d")
                 )
-                collector.logger.info(f"GDPNOW: Fetching from {forecast_start_date} to {forecast_end_date}")
             else:
-                # Handle regular GDP components with existing date range logic
-                if start_date is None:
-                    # Fetch all available historical data
-                    series_data = collector.get_series_data(
-                        series_id, 
-                        observation_end=end_date.strftime("%Y-%m-%d")
-                    )
-                else:
-                    # Fetch data with date range
-                    series_data = collector.get_series_data(
-                        series_id, 
-                        observation_start=start_date.strftime("%Y-%m-%d"),
-                        observation_end=end_date.strftime("%Y-%m-%d")
-                    )
+                # Fetch data with date range
+                series_data = collector.get_series_data(
+                    series_id, 
+                    observation_start=start_date.strftime("%Y-%m-%d"),
+                    observation_end=end_date.strftime("%Y-%m-%d")
+                )
             
             # Process the data
             processed_data = []
@@ -813,8 +865,8 @@ def collect_real_gdp_growth_components(database_url=None):
                     # Parse date and convert to quarter end date
                     obs_date = datetime.strptime(item["date"], "%Y-%m-%d").date()
                     
-                    # Only process data within target date range (except for GDPNOW which uses its own range)
-                    if series_id != "GDPNOW" and ((start_date and obs_date < start_date) or obs_date > end_date):
+                    # Only process data within target date range
+                    if (start_date and obs_date < start_date) or obs_date > end_date:
                         continue
                     
                     processed_data.append({
@@ -844,16 +896,15 @@ def collect_real_gdp_growth_components(database_url=None):
     # Prepare bulk data for database insertion
     bulk_data = []
     for date_key, record in combined_data.items():
-        # Include records that have either GDP growth rate OR forecast (to capture latest forecasts)
-        if "real_gdp_growth" in record or "gdp_now_forecast" in record:
+        # Include records that have GDP growth rate data
+        if "real_gdp_growth" in record:
             data = {
                 "date": record["date"],
                 "real_gdp_growth": record.get("real_gdp_growth"),
                 "consumption_contribution": record.get("consumption_contribution"),
                 "investment_contribution": record.get("investment_contribution"), 
                 "government_contribution": record.get("government_contribution"),
-                "net_exports_contribution": record.get("net_exports_contribution"),
-                "gdp_now_forecast": record.get("gdp_now_forecast")
+                "net_exports_contribution": record.get("net_exports_contribution")
             }
             bulk_data.append(data)
     

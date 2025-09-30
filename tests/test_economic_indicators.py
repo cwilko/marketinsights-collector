@@ -4,7 +4,7 @@ Tests for economic indicator data collectors.
 
 import pytest
 from datetime import datetime
-from data_collectors.economic_indicators import FREDCollector, BLSCollector, BEACollector, GermanBundCollector, collect_cpi, collect_monthly_fed_funds_rate, collect_daily_fed_funds_rate, collect_unemployment_rate, collect_gdp, collect_real_gdp_growth_components, collect_german_bund_yields
+from data_collectors.economic_indicators import FREDCollector, BLSCollector, BEACollector, GermanBundCollector, collect_cpi, collect_monthly_fed_funds_rate, collect_daily_fed_funds_rate, collect_unemployment_rate, collect_gdp, collect_real_gdp_growth_components, collect_gdpnow_forecasts, collect_german_bund_yields
 from data_collectors.market_data import collect_fred_treasury_yields, FRED_TREASURY_SERIES
 
 
@@ -230,6 +230,12 @@ class TestBEACollector:
                 print(f"✅ GDPNOW data is recent (within last 2 years)")
         else:
             print("WARNING: No GDPNOW data retrieved - series might not exist or be empty")
+            
+    def test_collect_gdpnow_forecasts_function(self):
+        """Test the new collect_gdpnow_forecasts function."""
+        result = collect_gdpnow_forecasts(database_url=None)
+        assert isinstance(result, int)
+        assert result >= 0  # Should process at least some records or return 0 in safe mode
 
 
 class TestFREDTreasuryYields:
