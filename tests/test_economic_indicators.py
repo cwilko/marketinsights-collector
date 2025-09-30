@@ -236,6 +236,25 @@ class TestBEACollector:
         result = collect_gdpnow_forecasts(database_url=None)
         assert isinstance(result, int)
         assert result >= 0  # Should process at least some records or return 0 in safe mode
+        
+    def test_collect_gdpnow_forecasts_incremental_logic(self):
+        """Test that GDPNow collection handles incremental updates properly."""
+        from data_collectors.economic_indicators import FREDCollector
+        
+        # Test that the collector uses proper incremental logic
+        collector = FREDCollector(database_url=None)
+        
+        # This should work without errors (tests the incremental logic structure)
+        start_date, end_date = collector.get_date_range_for_collection(
+            table="gdpnow_forecasts"
+        )
+        
+        # start_date and end_date should either both be None (up to date) or both be dates
+        if start_date is not None:
+            assert end_date is not None
+            assert start_date <= end_date
+        
+        print(f"GDPNow incremental test: start_date={start_date}, end_date={end_date}")
 
 
 class TestFREDTreasuryYields:

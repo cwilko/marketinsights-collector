@@ -778,11 +778,11 @@ def collect_gdpnow_forecasts(database_url=None):
     from datetime import timedelta
     
     if start_date is None:
-        # First time collection - get all available data
-        # Fetch last 10 years to get full historical dataset
+        # First time collection - get all available data from series start
+        # GDPNow data goes back to 2011, so fetch from beginning
         end_date = datetime.now().date()
-        start_date = end_date - timedelta(days=10*365)
-        collector.logger.info("GDPNow collection: First time collection - fetching all historical data")
+        start_date = None  # Let FRED API return all available data
+        collector.logger.info("GDPNow collection: First time collection - fetching all available historical data from series start")
     else:
         # Incremental collection with 6-month buffer for forecast revisions
         # GDPNow forecasts are revised multiple times per month, so we need
@@ -795,11 +795,20 @@ def collect_gdpnow_forecasts(database_url=None):
         collector.logger.info(f"Fetching GDPNow forecast data from FRED series GDPNOW")
         collector.logger.info(f"Date range: {start_date} to {end_date}")
         
-        series_data = collector.get_series_data(
-            "GDPNOW",
-            observation_start=start_date.strftime("%Y-%m-%d"),
-            observation_end=end_date.strftime("%Y-%m-%d")
-        )
+        # Handle API call based on whether we have a start date
+        if start_date is None:
+            # First time collection - get all available data
+            series_data = collector.get_series_data(
+                "GDPNOW",
+                observation_end=end_date.strftime("%Y-%m-%d")
+            )
+        else:
+            # Incremental collection with date range
+            series_data = collector.get_series_data(
+                "GDPNOW",
+                observation_start=start_date.strftime("%Y-%m-%d"),
+                observation_end=end_date.strftime("%Y-%m-%d")
+            )
         
         collector.logger.info(f"Retrieved {len(series_data)} raw observations for GDPNow")
         
