@@ -749,6 +749,10 @@ def collect_gdpnow_forecasts(database_url=None):
     """
     Collect GDPNow real-time GDP growth forecasts from Atlanta Fed (FRED series GDPNOW).
     
+    Note: GDPNow forecasts are updated multiple times throughout the month with revisions
+    for the same quarter. This function ALWAYS fetches recent data (bypassing incremental
+    update logic) to ensure we capture the latest forecast revisions.
+    
     Args:
         database_url (str, optional): Database connection URL. If None, no data is saved.
     
@@ -761,10 +765,14 @@ def collect_gdpnow_forecasts(database_url=None):
         # Safe mode - just test the connection and return
         collector.logger.info("Running in safe mode - no database operations")
     
-    # Always fetch the last 2 years of GDPNOW data to capture latest forecasts
+    # ALWAYS fetch the last 2 years of GDPNOW data (no incremental updates)
+    # GDPNow forecasts are revised multiple times per month, so we need to
+    # capture the latest revisions rather than using incremental logic
     from datetime import timedelta
     end_date = datetime.now().date()
     start_date = end_date - timedelta(days=2*365)  # 2 years back
+    
+    collector.logger.info("GDPNow collection: Bypassing incremental updates - always fetching recent data for forecast revisions")
     
     try:
         collector.logger.info(f"Fetching GDPNow forecast data from FRED series GDPNOW")
