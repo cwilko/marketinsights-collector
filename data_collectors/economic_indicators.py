@@ -774,20 +774,34 @@ def collect_real_gdp_growth_components(database_url=None):
         try:
             collector.logger.info(f"Fetching {component} data from FRED series {series_id}")
             
-            # Handle unlimited historical data fetch
-            if start_date is None:
-                # Fetch all available historical data
+            # Special handling for GDPNOW to ensure we get the latest data
+            if series_id == "GDPNOW":
+                # Always fetch the last 2 years of GDPNOW data to capture latest forecasts
+                from datetime import datetime, timedelta
+                forecast_end_date = datetime.now().date()
+                forecast_start_date = forecast_end_date - timedelta(days=2*365)  # 2 years back
+                
                 series_data = collector.get_series_data(
-                    series_id, 
-                    observation_end=end_date.strftime("%Y-%m-%d")
+                    series_id,
+                    observation_start=forecast_start_date.strftime("%Y-%m-%d"),
+                    observation_end=forecast_end_date.strftime("%Y-%m-%d")
                 )
+                collector.logger.info(f"GDPNOW: Fetching from {forecast_start_date} to {forecast_end_date}")
             else:
-                # Fetch data with date range
-                series_data = collector.get_series_data(
-                    series_id, 
-                    observation_start=start_date.strftime("%Y-%m-%d"),
-                    observation_end=end_date.strftime("%Y-%m-%d")
-                )
+                # Handle regular GDP components with existing date range logic
+                if start_date is None:
+                    # Fetch all available historical data
+                    series_data = collector.get_series_data(
+                        series_id, 
+                        observation_end=end_date.strftime("%Y-%m-%d")
+                    )
+                else:
+                    # Fetch data with date range
+                    series_data = collector.get_series_data(
+                        series_id, 
+                        observation_start=start_date.strftime("%Y-%m-%d"),
+                        observation_end=end_date.strftime("%Y-%m-%d")
+                    )
             
             # Process the data
             processed_data = []
@@ -799,8 +813,8 @@ def collect_real_gdp_growth_components(database_url=None):
                     # Parse date and convert to quarter end date
                     obs_date = datetime.strptime(item["date"], "%Y-%m-%d").date()
                     
-                    # Only process data within target date range
-                    if (start_date and obs_date < start_date) or obs_date > end_date:
+                    # Only process data within target date range (except for GDPNOW which uses its own range)
+                    if series_id != "GDPNOW" and ((start_date and obs_date < start_date) or obs_date > end_date):
                         continue
                     
                     processed_data.append({
@@ -830,8 +844,8 @@ def collect_real_gdp_growth_components(database_url=None):
     # Prepare bulk data for database insertion
     bulk_data = []
     for date_key, record in combined_data.items():
-        # Only include records that have the main GDP growth rate
-        if "real_gdp_growth" in record:
+        # Include records that have either GDP growth rate OR forecast (to capture latest forecasts)
+        if "real_gdp_growth" in record or "gdp_now_forecast" in record:
             data = {
                 "date": record["date"],
                 "real_gdp_growth": record.get("real_gdp_growth"),

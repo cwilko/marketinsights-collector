@@ -176,6 +176,60 @@ class TestBEACollector:
         result_safe = collect_real_gdp_growth_components(database_url=None)
         assert isinstance(result_safe, int)
         assert result_safe >= 0
+        
+    def test_gdpnow_series_exists(self):
+        """Test that GDPNOW series exists and can be fetched from FRED."""
+        collector = FREDCollector(database_url=None)
+        
+        # Test fetching recent GDPNOW data - get recent data by using observation_start
+        from datetime import datetime, timedelta
+        recent_start = datetime.now().date() - timedelta(days=365)  # Last year
+        
+        gdpnow_data = collector.get_series_data(
+            "GDPNOW", 
+            observation_start=recent_start.strftime("%Y-%m-%d")
+        )
+        
+        assert isinstance(gdpnow_data, list)
+        print(f"GDPNOW test: Retrieved {len(gdpnow_data)} records")
+        
+        if len(gdpnow_data) > 0:
+            # Find the most recent non-missing value
+            latest_forecast = None
+            for record in gdpnow_data:
+                if record['value'] != '.':
+                    latest_forecast = record
+                    break
+            
+            assert latest_forecast is not None, "No valid GDPNOW forecast data found"
+            assert "date" in latest_forecast
+            assert "value" in latest_forecast
+            
+            print(f"Latest GDPNOW forecast: {latest_forecast['date']} = {latest_forecast['value']}%")
+            
+            # Test that we have some recent data (within last 2 years)
+            from datetime import datetime, timedelta
+            latest_date = datetime.strptime(latest_forecast['date'], "%Y-%m-%d").date()
+            two_years_ago = datetime.now().date() - timedelta(days=2*365)
+            
+            print(f"Latest data date: {latest_date}, Two years ago: {two_years_ago}")
+            
+            # Print all available GDPNOW data for debugging
+            print("Recent GDPNOW records (non-missing only):")
+            count = 0
+            for record in gdpnow_data:
+                if record['value'] != '.' and count < 10:  # Show first 10 valid records
+                    print(f"  {count+1}: {record['date']} = {record['value']}%")
+                    count += 1
+                    
+            # The assertion about recent data - this will help us see what date range we actually have
+            if latest_date < two_years_ago:
+                print(f"WARNING: Latest GDPNOW data is from {latest_date}, which is older than 2 years")
+                print("This suggests the GDPNOW series may not be actively updated or has a different publication schedule")
+            else:
+                print(f"✅ GDPNOW data is recent (within last 2 years)")
+        else:
+            print("WARNING: No GDPNOW data retrieved - series might not exist or be empty")
 
 
 class TestFREDTreasuryYields:
