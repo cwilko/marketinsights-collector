@@ -1337,7 +1337,7 @@ def collect_uk_unemployment(database_url=None):
         return 0
 
 def collect_uk_gdp(database_url=None):
-    """Collect UK GDP data with incremental updates using ONS API."""
+    """Collect UK GDP data for all sector classifications with incremental updates using ONS API."""
     collector = ONSCollector(database_url)
     
     # Get date range for collection
@@ -1353,118 +1353,132 @@ def collect_uk_gdp(database_url=None):
     # Use gdp-to-four-decimal-places dataset with proper ONS API dimensions
     dataset_id = "gdp-to-four-decimal-places"
     
-    try:
-        collector.logger.info(f"Attempting to fetch UK GDP data from dataset: {dataset_id}")
-        
-        # Use the correct ONS API structure with dimensions
-        # Based on discovered dimension codes:
-        # geography=K02000001 (UK), unofficialstandardindustrialclassification=A--T (Monthly GDP)
-        observations = collector.get_dataset_data(
-            dataset_id=dataset_id,
-            time_constraint="*",  # Get all time periods
-            geography="K02000001",  # UK
-            unofficialstandardindustrialclassification="A--T"  # A-T : Monthly GDP
-        )
-        
-        if not observations:
-            collector.logger.error(f"No data returned from ONS dataset {dataset_id}")
-            return 0
-            
-        collector.logger.info(f"Successfully retrieved {len(observations)} observations from {dataset_id}")
-        
-    except Exception as e:
-        collector.logger.error(f"Failed to fetch data from {dataset_id}: {str(e)}")
-        return 0
+    # All available sector classifications from the ONS API
+    sector_classifications = [
+        "A--T",  # A-T : Monthly GDP
+        "A",     # A : Agriculture  
+        "B-E",   # B-E : Production Industries
+        "F",     # F : Construction
+        "G-T"    # G-T : Index of Services
+    ]
     
-    # Process ONS observations data
-    processed_data = []
-    for obs in observations:
+    all_processed_data = []
+    total_observations = 0
+    
+    # Collect data for each sector classification
+    for sector in sector_classifications:
         try:
-            if not isinstance(obs, dict):
+            collector.logger.info(f"Attempting to fetch UK GDP data for sector: {sector}")
+            
+            # Use the correct ONS API structure with dimensions
+            # geography=K02000001 (UK), unofficialstandardindustrialclassification=sector
+            observations = collector.get_dataset_data(
+                dataset_id=dataset_id,
+                time_constraint="*",  # Get all time periods
+                geography="K02000001",  # UK
+                unofficialstandardindustrialclassification=sector
+            )
+            
+            if not observations:
+                collector.logger.warning(f"No data returned from ONS dataset {dataset_id} for sector {sector}")
                 continue
                 
-            # ONS observation structure based on tidy data format
-            obs_date = None
-            obs_value = None
+            collector.logger.info(f"Successfully retrieved {len(observations)} observations from {dataset_id} for sector {sector}")
+            total_observations += len(observations)
             
-            # Extract date from dimensions (ONS tidy format)
-            if "dimensions" in obs:
-                dimensions = obs["dimensions"]
-                if "Time" in dimensions:
-                    time_info = dimensions["Time"]
-                    time_str = time_info.get("id", "") if isinstance(time_info, dict) else str(time_info)
-                elif "time" in dimensions:
-                    time_info = dimensions["time"]
-                    time_str = time_info.get("id", "") if isinstance(time_info, dict) else str(time_info)
-                else:
-                    time_str = None
-                
-                if time_str:
-                    # ONS GDP data uses "Dec-98" format (monthly)
-                    try:
-                        if len(time_str) == 6 and "-" in time_str:  # MMM-YY format
-                            month_abbr, year_suffix = time_str.split("-")
-                            # Convert 2-digit year to 4-digit
-                            # Years 00-29 assume 20XX, years 30-99 assume 19XX (handles 1980s-1990s data)
-                            year_int = int(year_suffix)
-                            if year_int <= 29:
-                                full_year = 2000 + year_int  # 00-29 -> 2000-2029
-                            else:
-                                full_year = 1900 + year_int  # 30-99 -> 1930-1999
-                            month_map = {
-                                'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
-                                'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12
-                            }
-                            if month_abbr.lower() in month_map:
-                                obs_date = datetime(full_year, month_map[month_abbr.lower()], 1).date()
-                        elif len(time_str) == 7 and "-" in time_str:  # YYYY-MM
-                            obs_date = datetime.strptime(time_str + "-01", "%Y-%m-%d").date()
-                        elif len(time_str) == 10:  # YYYY-MM-DD
-                            obs_date = datetime.strptime(time_str, "%Y-%m-%d").date()
-                    except Exception as parse_error:
-                        collector.logger.debug(f"Could not parse GDP date '{time_str}': {str(parse_error)}")
-                        pass
-            
-            # Extract value from observation field
-            if "observation" in obs:
+            # Process ONS observations data for this sector
+            for obs in observations:
                 try:
-                    obs_value = float(obs["observation"])
-                except:
-                    pass
-            elif "value" in obs:
-                try:
-                    obs_value = float(obs["value"])
-                except:
-                    pass
-            
-            # Skip if we couldn't parse date or value
-            if obs_date is None or obs_value is None:
-                continue
-                
-            # Only process data within our target date range
-            if (start_date and obs_date < start_date) or obs_date > end_date:
-                continue
-                
-            processed_data.append({
-                "date": obs_date,
-                "gdp_index": obs_value,  # GDP index value
-            })
+                    if not isinstance(obs, dict):
+                        continue
+                        
+                    # ONS observation structure based on tidy data format
+                    obs_date = None
+                    obs_value = None
+                    
+                    # Extract date from dimensions (ONS tidy format)
+                    if "dimensions" in obs:
+                        dimensions = obs["dimensions"]
+                        if "Time" in dimensions:
+                            time_info = dimensions["Time"]
+                            time_str = time_info.get("id", "") if isinstance(time_info, dict) else str(time_info)
+                        elif "time" in dimensions:
+                            time_info = dimensions["time"]
+                            time_str = time_info.get("id", "") if isinstance(time_info, dict) else str(time_info)
+                        else:
+                            time_str = None
+                        
+                        if time_str:
+                            # ONS GDP data uses "Dec-98" format (monthly)
+                            try:
+                                if len(time_str) == 6 and "-" in time_str:  # MMM-YY format
+                                    month_abbr, year_suffix = time_str.split("-")
+                                    # Convert 2-digit year to 4-digit
+                                    # Years 00-29 assume 20XX, years 30-99 assume 19XX (handles 1980s-1990s data)
+                                    year_int = int(year_suffix)
+                                    if year_int <= 29:
+                                        full_year = 2000 + year_int  # 00-29 -> 2000-2029
+                                    else:
+                                        full_year = 1900 + year_int  # 30-99 -> 1930-1999
+                                    month_map = {
+                                        'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
+                                        'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12
+                                    }
+                                    if month_abbr.lower() in month_map:
+                                        obs_date = datetime(full_year, month_map[month_abbr.lower()], 1).date()
+                                elif len(time_str) == 7 and "-" in time_str:  # YYYY-MM
+                                    obs_date = datetime.strptime(time_str + "-01", "%Y-%m-%d").date()
+                                elif len(time_str) == 10:  # YYYY-MM-DD
+                                    obs_date = datetime.strptime(time_str, "%Y-%m-%d").date()
+                            except Exception as parse_error:
+                                collector.logger.debug(f"Could not parse GDP date '{time_str}': {str(parse_error)}")
+                                pass
+                    
+                    # Extract value from observation field
+                    if "observation" in obs:
+                        try:
+                            obs_value = float(obs["observation"])
+                        except:
+                            pass
+                    elif "value" in obs:
+                        try:
+                            obs_value = float(obs["value"])
+                        except:
+                            pass
+                    
+                    # Skip if we couldn't parse date or value
+                    if obs_date is None or obs_value is None:
+                        continue
+                        
+                    # Only process data within our target date range
+                    if (start_date and obs_date < start_date) or obs_date > end_date:
+                        continue
+                        
+                    all_processed_data.append({
+                        "date": obs_date,
+                        "sector_classification": sector,
+                        "gdp_index": obs_value,  # GDP index value
+                    })
+                    
+                except Exception as e:
+                    collector.logger.error(f"Error processing ONS GDP observation for sector {sector}: {str(e)}")
             
         except Exception as e:
-            collector.logger.error(f"Error processing ONS GDP observation: {str(e)}")
+            collector.logger.error(f"Failed to fetch data from {dataset_id} for sector {sector}: {str(e)}")
+            continue
     
-    if not processed_data:
+    if not all_processed_data:
         collector.logger.warning("No valid UK GDP data could be processed from ONS observations")
         return 0
     
-    # Sort chronologically
-    processed_data.sort(key=lambda x: x["date"])
-    collector.logger.info(f"Processing {len(processed_data)} UK GDP records from ONS")
+    # Sort chronologically, then by sector
+    all_processed_data.sort(key=lambda x: (x["date"], x["sector_classification"]))
+    collector.logger.info(f"Processing {len(all_processed_data)} UK GDP records from {total_observations} total observations across {len(sector_classifications)} sectors")
     
     # Bulk upsert all records
-    if processed_data:
-        success_count = collector.bulk_upsert_data("uk_gross_domestic_product", processed_data)
-        collector.logger.info(f"Successfully bulk upserted {success_count} UK GDP records")
+    if all_processed_data:
+        success_count = collector.bulk_upsert_data("uk_gross_domestic_product", all_processed_data)
+        collector.logger.info(f"Successfully bulk upserted {success_count} UK GDP records across all sectors")
         return success_count
     else:
         collector.logger.info("No valid UK GDP data to process")

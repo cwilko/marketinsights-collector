@@ -100,12 +100,17 @@ This document provides comprehensive information about all data sources and data
 - **Dataset ID**: `gdp-to-four-decimal-places`
 - **Dimensions**:
   - `geography=K02000001` (United Kingdom)
-  - `unofficialstandardindustrialclassification=A--T` (A-T : Monthly GDP)
+  - `unofficialstandardindustrialclassification` (All 5 sector classifications):
+    - `A--T` (A-T : Monthly GDP)
+    - `A` (A : Agriculture)
+    - `B-E` (B-E : Production Industries)
+    - `F` (F : Construction)
+    - `G-T` (G-T : Index of Services)
 - **Update Frequency**: Monthly
-- **Records**: ~306 observations
+- **Records**: ~1,530 observations (306 per sector × 5 sectors)
 - **Database Table**: `uk_gross_domestic_product`
-- **SQL Schema**: `/dags/uk-metrics-pipeline/config/create_tables.sql`
-- **Key Columns**: `date`, `gdp_value`, `month_over_month_change`, `year_over_year_change`
+- **SQL Schema**: `/dags/econometrics-pipeline/config/create_tables.sql`
+- **Key Columns**: `date`, `sector_classification`, `gdp_index`
 - **Collector Function**: `collect_uk_gdp()`
 
 ### UK Bank Rate
