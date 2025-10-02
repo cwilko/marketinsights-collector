@@ -2317,3 +2317,174 @@ def collect_german_bund_yields(database_url=None):
     except Exception as e:
         collector.logger.error(f"German Bund yield collection failed: {str(e)}")
         raise
+
+class UKGDPSectorWeightsCollector(BaseCollector):
+    def __init__(self, database_url=None):
+        super().__init__(database_url)
+        self.base_url = "https://www.ons.gov.uk/file"
+        
+    def download_ons_gdp_weights_file(self, url: str, local_path: str = "mgdpdatasourcescatalogue.xlsx") -> str:
+        """Download the ONS GDP weights Excel file."""
+        self.logger.info(f"Downloading GDP weights file from: {url}")
+        
+        try:
+            response = self.session.get(url, timeout=30)
+            response.raise_for_status()
+            
+            with open(local_path, 'wb') as f:
+                f.write(response.content)
+            
+            self.logger.info(f"Successfully downloaded {len(response.content)} bytes to {local_path}")
+            return local_path
+            
+        except Exception as e:
+            self.logger.error(f"Failed to download GDP weights file: {str(e)}")
+            raise
+
+    def get_sector_weights_from_excel(self, file_path: str) -> List[Dict[str, Any]]:
+        """Extract UK GDP sector weights from ONS Excel file."""
+        self.logger.info(f"Extracting sector weights from: {file_path}")
+        
+        try:
+            # Read the specific sheet containing weights data
+            df = pd.read_excel(file_path, sheet_name="BB24 - CURRENT PRICE & VOLUME", engine='openpyxl')
+            
+            # Find the header row containing 'Level', 'Section', 'weight', 'Description', 'Category'
+            level_col = None
+            section_col = None
+            weight_col = None
+            description_col = None
+            category_col = None
+            
+            # Search for header row in the data
+            for i, row in df.iterrows():
+                if i > 20:  # Don't search too far down
+                    break
+                    
+                row_values = [str(cell).lower().strip() for cell in row if pd.notna(cell)]
+                if 'level' in row_values and 'section' in row_values and 'weight' in row_values:
+                    self.logger.info(f"Found header row at index {i}")
+                    
+                    # Map column positions
+                    for j, cell in enumerate(row):
+                        cell_str = str(cell).lower().strip()
+                        if cell_str == 'level':
+                            level_col = j
+                        elif cell_str == 'section':
+                            section_col = j
+                        elif cell_str == 'weight':
+                            weight_col = j
+                        elif 'description' in cell_str:
+                            description_col = j
+                        elif 'category' in cell_str:
+                            category_col = j
+                    
+                    # Use data starting from the next row
+                    df = df.iloc[i+1:].reset_index(drop=True)
+                    break
+            
+            if level_col is None or section_col is None or weight_col is None:
+                raise ValueError("Could not find required columns: Level, Section, weight")
+            
+            # Extract sector weights where Level = "Section"
+            sector_data = []
+            for i, row in df.iterrows():
+                try:
+                    level_value = row.iloc[level_col] if level_col < len(row) else None
+                    section_value = row.iloc[section_col] if section_col < len(row) else None
+                    weight_value = row.iloc[weight_col] if weight_col < len(row) else None
+                    
+                    if (pd.notna(level_value) and pd.notna(section_value) and pd.notna(weight_value) and
+                        str(level_value).strip().lower() == 'section'):
+                        
+                        section_str = str(section_value).strip().upper()
+                        weight_float = float(weight_value)
+                        
+                        # Check if section is single letter A-T
+                        if len(section_str) == 1 and section_str.isalpha() and 'A' <= section_str <= 'T':
+                            
+                            # Extract optional description and category
+                            description = ""
+                            category = ""
+                            
+                            if description_col is not None and description_col < len(row):
+                                desc_value = row.iloc[description_col]
+                                if pd.notna(desc_value):
+                                    description = str(desc_value).strip()
+                            
+                            if category_col is not None and category_col < len(row):
+                                cat_value = row.iloc[category_col]
+                                if pd.notna(cat_value):
+                                    category = str(cat_value).strip()
+                            
+                            sector_data.append({
+                                'section': section_str,
+                                'description': description,
+                                'category': category,
+                                'weight': weight_float,
+                                'data_source': 'ONS_GDP_Source_Catalogue',
+                                'file_version': 'BB24'  # Blue Book 2024
+                            })
+                            
+                            self.logger.debug(f"Section {section_str}: {weight_float} - {description}")
+                            
+                except (ValueError, TypeError, IndexError):
+                    continue
+            
+            self.logger.info(f"Extracted {len(sector_data)} sector weight records")
+            
+            # Verify total weights sum to approximately 1000
+            total_weight = sum(item['weight'] for item in sector_data)
+            self.logger.info(f"Total sector weights: {total_weight} (should be ~1000)")
+            
+            if not (990 <= total_weight <= 1010):
+                self.logger.warning(f"Sector weights sum validation failed: {total_weight}")
+            
+            return sector_data
+            
+        except Exception as e:
+            self.logger.error(f"Failed to extract sector weights: {str(e)}")
+            raise
+
+def collect_uk_gdp_sector_weights(database_url=None):
+    """
+    Collect UK GDP sector weights data from ONS source catalogue Excel file.
+    
+    Safe by default - requires explicit database_url to write to database.
+    Returns count of records processed.
+    """
+    collector = UKGDPSectorWeightsCollector(database_url)
+    
+    url = "https://www.ons.gov.uk/file?uri=/economy/grossdomesticproductgdp/datasets/gdpodatasourcescatalogue/current/mgdpdatasourcescatalogue.xlsx"
+    
+    try:
+        # Download the Excel file
+        file_path = collector.download_ons_gdp_weights_file(url)
+        
+        # Extract sector weights data
+        sector_weights = collector.get_sector_weights_from_excel(file_path)
+        
+        if not sector_weights:
+            collector.logger.info("No UK GDP sector weights data retrieved")
+            return 0
+        
+        # Bulk upsert all records
+        success_count = collector.bulk_upsert_data(
+            "uk_gdp_sector_weights", 
+            sector_weights,
+            conflict_columns=['section', 'data_source', 'file_version']
+        )
+        
+        collector.logger.info(f"Successfully collected {success_count} UK GDP sector weight records")
+        
+        # Cleanup temporary file
+        import os
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            collector.logger.info(f"Cleaned up temporary file: {file_path}")
+        
+        return success_count
+        
+    except Exception as e:
+        collector.logger.error(f"UK GDP sector weights collection failed: {str(e)}")
+        raise
