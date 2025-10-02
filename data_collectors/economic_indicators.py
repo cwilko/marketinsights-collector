@@ -1477,7 +1477,8 @@ def collect_uk_gdp(database_url=None):
     
     # Bulk upsert all records
     if all_processed_data:
-        success_count = collector.bulk_upsert_data("uk_gross_domestic_product", all_processed_data)
+        success_count = collector.bulk_upsert_data("uk_gross_domestic_product", all_processed_data, 
+                                                  conflict_columns=['date', 'sector_classification'])
         collector.logger.info(f"Successfully bulk upserted {success_count} UK GDP records across all sectors")
         return success_count
     else:
