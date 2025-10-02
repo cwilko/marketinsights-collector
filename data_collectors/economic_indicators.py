@@ -1357,9 +1357,9 @@ def collect_uk_gdp(database_url=None):
     sector_classifications = [
         "A--T",  # A-T : Monthly GDP
         "A",     # A : Agriculture  
-        "B-E",   # B-E : Production Industries
+        "B--E",  # B-E : Production Industries
         "F",     # F : Construction
-        "G-T"    # G-T : Index of Services
+        "G--T"   # G-T : Index of Services
     ]
     
     all_processed_data = []
@@ -1380,8 +1380,8 @@ def collect_uk_gdp(database_url=None):
             )
             
             if not observations:
-                collector.logger.warning(f"No data returned from ONS dataset {dataset_id} for sector {sector}")
-                continue
+                collector.logger.error(f"No data returned from ONS dataset {dataset_id} for sector {sector}")
+                raise Exception(f"UK GDP collection failed: No data returned for expected sector {sector}")
                 
             collector.logger.info(f"Successfully retrieved {len(observations)} observations from {dataset_id} for sector {sector}")
             total_observations += len(observations)
@@ -1465,7 +1465,7 @@ def collect_uk_gdp(database_url=None):
             
         except Exception as e:
             collector.logger.error(f"Failed to fetch data from {dataset_id} for sector {sector}: {str(e)}")
-            continue
+            raise Exception(f"UK GDP collection failed for sector {sector}: {str(e)}")
     
     if not all_processed_data:
         collector.logger.warning("No valid UK GDP data could be processed from ONS observations")
