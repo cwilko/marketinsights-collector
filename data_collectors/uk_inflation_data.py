@@ -337,15 +337,37 @@ class UKInflationCollector(BaseCollector):
         self.logger.info(f"Extracted descriptions for {len(descriptions)} COICOP categories")
         return descriptions
 
+    def _fix_coicop_hierarchy_levels(self, coicop_codes: Dict[str, int]) -> Dict[str, int]:
+        """Fix COICOP hierarchy levels: 00 should be Level 0, 01-12 should be Level 1."""
+        fixed_codes = {}
+        
+        for code, level in coicop_codes.items():
+            if code == '00':
+                # 00 (ALL ITEMS) should be Level 0 - the top of the hierarchy
+                fixed_codes[code] = 0
+                self.logger.debug(f"Fixed {code}: Level {level} -> Level 0 (root category)")
+            elif code in ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12']:
+                # Level 1 categories (01-12) should remain Level 1 but will have parent=00
+                fixed_codes[code] = 1
+            else:
+                # All other categories keep their original levels
+                fixed_codes[code] = level
+        
+        self.logger.info(f"Fixed COICOP hierarchy: 00 is now Level 0 (root), 01-12 are Level 1 with parent=00")
+        return fixed_codes
+
     def build_coicop_hierarchy_records(self, coicop_codes: Dict[str, int], descriptions: Dict[str, str]) -> List[Dict[str, Any]]:
         """Build hierarchy records with parent-child relationships."""
-        # First, identify and create missing parent categories
-        missing_parents = self._identify_missing_parents(coicop_codes)
+        # First, fix the hierarchy: 00 should be Level 0, 01-12 should be Level 1 with parent=00
+        corrected_coicop_codes = self._fix_coicop_hierarchy_levels(coicop_codes)
+        
+        # Then identify and create missing parent categories
+        missing_parents = self._identify_missing_parents(corrected_coicop_codes)
         if missing_parents:
             self.logger.info(f"Auto-generating {len(missing_parents)} missing parent categories to complete COICOP hierarchy")
             
         # Add missing parents to the codes dictionary
-        complete_coicop_codes = coicop_codes.copy()
+        complete_coicop_codes = corrected_coicop_codes.copy()
         for parent_id, level in missing_parents.items():
             complete_coicop_codes[parent_id] = level
             self.logger.info(f"Created missing parent: {parent_id} (Level {level})")
@@ -355,16 +377,20 @@ class UKInflationCollector(BaseCollector):
         for coicop_code, level in complete_coicop_codes.items():
             # Determine parent_id based on hierarchy
             parent_id = None
-            if level > 1:
-                # Parent is the code with one less level
-                if level == 2:
-                    parent_id = coicop_code.split('.')[0]  # '01.1' -> '01'
-                elif level == 3:
-                    parts = coicop_code.split('.')
-                    parent_id = '.'.join(parts[:2])  # '01.1.1' -> '01.1'
-                elif level == 4:
-                    parts = coicop_code.split('.')
-                    parent_id = '.'.join(parts[:3])  # '01.1.1.1' -> '01.1.1'
+            if level > 0:
+                # Special case: Level 1 categories (01-12) have parent 00
+                if level == 1 and coicop_code != '00':
+                    parent_id = '00'
+                elif level > 1:
+                    # Parent is the code with one less level
+                    if level == 2:
+                        parent_id = coicop_code.split('.')[0]  # '01.1' -> '01'
+                    elif level == 3:
+                        parts = coicop_code.split('.')
+                        parent_id = '.'.join(parts[:2])  # '01.1.1' -> '01.1'
+                    elif level == 4:
+                        parts = coicop_code.split('.')
+                        parent_id = '.'.join(parts[:3])  # '01.1.1.1' -> '01.1.1'
                 
                 # Validate that parent exists in our complete codes - should never fail now
                 if parent_id and parent_id not in complete_coicop_codes:
