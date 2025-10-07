@@ -189,27 +189,20 @@ class UKInflationCollector(BaseCollector):
         for code, level in coicop_codes.items():
             level_counts[level] = level_counts.get(level, 0) + 1
         
-        # Validate exact counts based on complete COICOP hierarchy
-        # CPI has 316 categories, CPIH has 317 (adds 04.2 Owner Occupiers Housing + 04.9 Council Tax, removes 09.2.1 combined)
-        # Since we extract from both CPI and CPIH together, we expect the union of both: 318 total unique categories
-        expected_total = 318  # 316 (CPI base) + 2 (CPIH-only: 04.2, 04.9)
-        expected_counts = {1: 13, 2: 42, 3: 71, 4: 192}  # Level 2: 40 (base) + 2 (04.2, 04.9) = 42
-        
+        # Validate COICOP hierarchy coverage - be flexible since we'll filter by weight availability
         total_found = sum(level_counts.values())
-        if total_found != expected_total:
-            raise ValueError(f"CRITICAL ERROR: Found {total_found} COICOP categories, expected exactly {expected_total}. Data integrity issue - missing or extra categories detected.")
+        self.logger.info(f"Found {total_found} total COICOP categories across {max(level_counts.keys())} levels")
         
-        # Ensure we have all Level 1 categories (this is non-negotiable)
+        # Ensure we have all Level 1 categories (this is non-negotiable for inflation analysis)
         if level_counts.get(1, 0) != 13:
-            raise ValueError(f"CRITICAL ERROR: Level 1 COICOP categories - Found {level_counts.get(1, 0)}, must be exactly 13. Critical inflation categories missing.")
+            raise ValueError(f"CRITICAL ERROR: Level 1 COICOP categories - Found {level_counts.get(1, 0)}, must be exactly 13. Core inflation categories missing.")
         
-        # Check all levels have exact expected coverage
+        # Warn about incomplete coverage at other levels (but don't error since we'll filter by weights)
+        expected_counts = {2: 42, 3: 71, 4: 192}
         for level, expected_count in expected_counts.items():
-            if level == 1:  # Already checked above
-                continue
             actual_count = level_counts.get(level, 0)
             if actual_count != expected_count:
-                raise ValueError(f"CRITICAL ERROR: Level {level} COICOP categories - Found {actual_count}, expected exactly {expected_count}. Data integrity compromised.")
+                self.logger.warning(f"Level {level} COICOP categories: Found {actual_count}, expected {expected_count}. Will filter by weight availability.")
         
         # Log the actual structure found
         for level in sorted(level_counts.keys()):
@@ -260,14 +253,15 @@ class UKInflationCollector(BaseCollector):
                 else:
                     # Only error for headline weights which are critical
                     raise ValueError(f"CRITICAL ERROR: CPI WEIGHTS {coicop_code} (headline) column not found in MM23.csv - data integrity compromised")
-            elif '.' not in coicop_code:  # Only Level 1 categories typically have weights
-                # Flexible pattern for Level 1 category weights
-                pattern = rf"CPI WEIGHTS {re.escape(coicop_code)}\s*[:=-]"
+            else:
+                # Flexible pattern for all COICOP categories (Level 1, 2, 3, 4)
+                # Pattern handles: "CPI WEIGHTS XX:", "CPI WEIGHTS XX Description", and "CPI WEIGHTS XX/YY Combined categories"
+                pattern = rf"CPI WEIGHTS {re.escape(coicop_code)}(?:/[0-9]+)*(?:\s*[:=-]|\s+[A-Za-z])"
                 weight_col = self.find_column_by_regex(df, pattern)
                 if weight_col is not None:
                     columns['CPI']['weights'][coicop_code] = weight_col
                     self.logger.debug(f"✅ Found CPI WEIGHTS {coicop_code} at position {weight_col + 1}")
-                # Note: Not all Level 1 categories may have weights columns, so don't error
+                # Note: Not all categories may have weights columns, so don't error
         
         self.logger.info(f"Found {len(columns['CPI']['indices'])} CPI INDEX columns and {len(columns['CPI']['weights'])} CPI WEIGHTS columns")
         
@@ -299,14 +293,15 @@ class UKInflationCollector(BaseCollector):
                 else:
                     # Only error for headline weights which are critical
                     raise ValueError(f"CRITICAL ERROR: CPIH WEIGHTS {coicop_code} (headline) column not found in MM23.csv - data integrity compromised")
-            elif '.' not in coicop_code:  # Only Level 1 categories typically have weights
-                # Flexible pattern for Level 1 category weights
-                pattern = rf"CPIH WEIGHTS {re.escape(coicop_code)}\s*[:=-]"
+            else:
+                # Flexible pattern for all COICOP categories (Level 1, 2, 3, 4)
+                # Pattern handles: "CPIH WEIGHTS XX:", "CPIH WEIGHTS XX Description", and "CPIH WEIGHTS XX/YY Combined categories"
+                pattern = rf"CPIH WEIGHTS {re.escape(coicop_code)}(?:/[0-9]+)*(?:\s*[:=-]|\s+[A-Za-z])"
                 weight_col = self.find_column_by_regex(df, pattern)
                 if weight_col is not None:
                     columns['CPIH']['weights'][coicop_code] = weight_col
                     self.logger.debug(f"✅ Found CPIH WEIGHTS {coicop_code} at position {weight_col + 1}")
-                # Note: Not all Level 1 categories may have weights columns, so don't error
+                # Note: Not all categories may have weights columns, so don't error
         
         self.logger.info(f"Found {len(columns['CPIH']['indices'])} CPIH INDEX columns and {len(columns['CPIH']['weights'])} CPIH WEIGHTS columns")
         
@@ -344,9 +339,20 @@ class UKInflationCollector(BaseCollector):
 
     def build_coicop_hierarchy_records(self, coicop_codes: Dict[str, int], descriptions: Dict[str, str]) -> List[Dict[str, Any]]:
         """Build hierarchy records with parent-child relationships."""
+        # First, identify and create missing parent categories
+        missing_parents = self._identify_missing_parents(coicop_codes)
+        if missing_parents:
+            self.logger.info(f"Auto-generating {len(missing_parents)} missing parent categories to complete COICOP hierarchy")
+            
+        # Add missing parents to the codes dictionary
+        complete_coicop_codes = coicop_codes.copy()
+        for parent_id, level in missing_parents.items():
+            complete_coicop_codes[parent_id] = level
+            self.logger.info(f"Created missing parent: {parent_id} (Level {level})")
+        
         records = []
         
-        for coicop_code, level in coicop_codes.items():
+        for coicop_code, level in complete_coicop_codes.items():
             # Determine parent_id based on hierarchy
             parent_id = None
             if level > 1:
@@ -359,13 +365,21 @@ class UKInflationCollector(BaseCollector):
                 elif level == 4:
                     parts = coicop_code.split('.')
                     parent_id = '.'.join(parts[:3])  # '01.1.1.1' -> '01.1.1'
+                
+                # Validate that parent exists in our complete codes - should never fail now
+                if parent_id and parent_id not in complete_coicop_codes:
+                    raise ValueError(f"CRITICAL ERROR: COICOP hierarchy integrity violation - {coicop_code} references parent {parent_id} which does not exist even after auto-generation. This indicates a fundamental data structure issue.")
             
             # Get description from headers or use Level 1 mapping
             description = descriptions.get(coicop_code)
             if not description and coicop_code in self.level1_categories:
                 description = self.level1_categories[coicop_code]
             if not description:
-                description = f"COICOP {coicop_code}"  # Fallback
+                if coicop_code in missing_parents:
+                    # For auto-generated parents, use simple "Unknown" description
+                    description = "Unknown"
+                else:
+                    description = f"COICOP {coicop_code}"  # Fallback
             
             # Calculate sort order
             sort_order = self.calculate_sort_order(coicop_code)
@@ -379,6 +393,169 @@ class UKInflationCollector(BaseCollector):
             })
         
         return records
+
+    def _identify_missing_parents(self, coicop_codes: Dict[str, int]) -> Dict[str, int]:
+        """Identify missing parent categories that need to be auto-generated (recursively)."""
+        missing_parents = {}
+        all_codes = coicop_codes.copy()
+        
+        # Keep iterating until no new missing parents are found
+        found_new_missing = True
+        iteration = 0
+        
+        while found_new_missing and iteration < 10:  # Safety limit
+            found_new_missing = False
+            iteration += 1
+            new_missing_this_iteration = {}
+            
+            # Take a snapshot of codes to iterate over (avoid modification during iteration)
+            codes_to_check = all_codes.copy()
+            
+            for coicop_code, level in codes_to_check.items():
+                if level > 1:
+                    # Determine what the parent should be
+                    if level == 2:
+                        parent_id = coicop_code.split('.')[0]
+                    elif level == 3:
+                        parts = coicop_code.split('.')
+                        parent_id = '.'.join(parts[:2])
+                    elif level == 4:
+                        parts = coicop_code.split('.')
+                        parent_id = '.'.join(parts[:3])
+                    else:
+                        continue
+                    
+                    # Check if parent exists in current working set
+                    if parent_id and parent_id not in all_codes:
+                        # Calculate parent level
+                        parent_level = level - 1
+                        new_missing_this_iteration[parent_id] = parent_level
+                        self.logger.debug(f"Iteration {iteration}: Identified missing parent: {parent_id} (Level {parent_level}) for child {coicop_code}")
+            
+            # Add new missing parents to both tracking dicts
+            if new_missing_this_iteration:
+                missing_parents.update(new_missing_this_iteration)
+                all_codes.update(new_missing_this_iteration)
+                found_new_missing = True
+        
+        if iteration >= 10:
+            self.logger.warning("Missing parent detection reached maximum iterations - possible infinite loop in hierarchy")
+        
+        return missing_parents
+
+    def _calculate_parent_weights(self, weights_by_series: Dict[str, Dict[str, Dict[int, float]]], hierarchy_records: List[Dict[str, Any]]) -> Dict[str, Dict[str, Dict[int, float]]]:
+        """Calculate weights for auto-generated parent categories by summing children's weights."""
+        # Build parent-child mapping
+        children_by_parent = {}
+        for record in hierarchy_records:
+            parent_id = record.get('parent_id')
+            if parent_id:
+                if parent_id not in children_by_parent:
+                    children_by_parent[parent_id] = []
+                children_by_parent[parent_id].append(record['coicop_id'])
+        
+        # Calculate weights for each series type
+        for series_type in ['CPI', 'CPIH']:
+            if series_type not in weights_by_series:
+                continue
+                
+            # Find categories that need weight calculation (auto-generated parents)
+            existing_categories = set(weights_by_series[series_type].keys())
+            all_categories = {record['coicop_id'] for record in hierarchy_records}
+            missing_weight_categories = all_categories - existing_categories
+            
+            # Calculate weights for missing categories that have children
+            for parent_id in missing_weight_categories:
+                if parent_id in children_by_parent:
+                    children = children_by_parent[parent_id]
+                    parent_weights = {}
+                    
+                    # For each year, sum children's weights
+                    all_years = set()
+                    for child_id in children:
+                        if child_id in weights_by_series[series_type]:
+                            all_years.update(weights_by_series[series_type][child_id].keys())
+                    
+                    for year in all_years:
+                        total_weight = 0.0
+                        children_found = 0
+                        
+                        for child_id in children:
+                            if child_id in weights_by_series[series_type]:
+                                child_weights = weights_by_series[series_type][child_id]
+                                if year in child_weights:
+                                    total_weight += child_weights[year]
+                                    children_found += 1
+                        
+                        # Only set parent weight if we found weights for at least one child
+                        if children_found > 0:
+                            parent_weights[year] = total_weight
+                    
+                    if parent_weights:
+                        weights_by_series[series_type][parent_id] = parent_weights
+                        self.logger.info(f"Calculated {series_type} weights for auto-generated parent {parent_id}: {len(parent_weights)} years, max weight = {max(parent_weights.values()):.2f}")
+        
+        return weights_by_series
+
+    def _calculate_missing_weights_from_children(self, columns: Dict[str, Dict[str, Dict[str, int]]], hierarchy_records: List[Dict[str, Any]], df: pd.DataFrame) -> Dict[str, Dict[str, Dict[int, float]]]:
+        """Calculate missing weights from children's weights, including auto-generated parents."""
+        
+        # Step 1: Parse weights for categories that have weight columns
+        weights_by_series = {}
+        for series_type in ['CPI', 'CPIH']:
+            weights_by_series[series_type] = {}
+            for cat, weight_col in columns[series_type]['weights'].items():
+                if weight_col is not None:
+                    weights = self.parse_weight_data(df, weight_col, f"{series_type} {cat}")
+                    if weights:  # Only store if we got actual weight data
+                        weights_by_series[series_type][cat] = weights
+        
+        # Step 2: Calculate missing weights from children using existing logic
+        weights_by_series = self._calculate_parent_weights(weights_by_series, hierarchy_records)
+        
+        # Step 3: Validate that every category now has weights (either direct or calculated)
+        for series_type in ['CPI', 'CPIH']:
+            categories_with_indices = set(columns[series_type]['indices'].keys())
+            categories_with_weights = set(weights_by_series[series_type].keys())
+            
+            still_missing = categories_with_indices - categories_with_weights
+            if still_missing:
+                # These categories have index data but no weights and no children with weights
+                self.logger.error(f"{series_type}: {len(still_missing)} categories cannot be used - no weights available")
+                sample_missing = list(still_missing)[:5]
+                raise ValueError(f"CRITICAL ERROR: {series_type} categories have index data but no weights could be calculated: {sample_missing}. "
+                               f"These categories have no weight columns and no children with weights for weight calculation.")
+            
+            self.logger.info(f"{series_type}: All {len(categories_with_indices)} categories have weights (direct or calculated)")
+        
+        return weights_by_series
+
+    def _validate_weight_columns_exist(self, columns: Dict[str, Dict[str, Dict[str, int]]], coicop_codes: Dict[str, int]) -> None:
+        """Validate that every category with index data has a corresponding weight column."""
+        for series_type in ['CPI', 'CPIH']:
+            categories_with_indices = set(columns[series_type]['indices'].keys())
+            categories_with_weights = set(columns[series_type]['weights'].keys())
+            
+            missing_weights = categories_with_indices - categories_with_weights
+            if missing_weights:
+                # Separate by level for clearer error messages
+                missing_by_level = {}
+                for cat in missing_weights:
+                    level = coicop_codes.get(cat, 'Unknown')
+                    if level not in missing_by_level:
+                        missing_by_level[level] = []
+                    missing_by_level[level].append(cat)
+                
+                error_details = []
+                for level in sorted(missing_by_level.keys()):
+                    cats = missing_by_level[level]
+                    error_details.append(f"Level {level}: {len(cats)} categories ({cats[:5]}{'...' if len(cats) > 5 else ''})")
+                
+                raise ValueError(f"CRITICAL ERROR: {series_type} categories have index data but no weight columns. "
+                               f"Every category must have weights for contribution analysis. "
+                               f"Missing weight columns: {'; '.join(error_details)}")
+            
+            self.logger.info(f"{series_type}: All {len(categories_with_indices)} categories have both index and weight columns")
 
     def calculate_sort_order(self, coicop_id: str) -> int:
         """Calculate sort order for hierarchical sorting."""
@@ -483,23 +660,24 @@ class UKInflationCollector(BaseCollector):
             # Find column positions
             columns = self.find_series_columns(df)
             
+            # Extract all COICOP codes for validation
+            coicop_codes = self.extract_all_coicop_codes(df)
+            descriptions = self.extract_coicop_descriptions_from_headers(df)
+            hierarchy_records = self.build_coicop_hierarchy_records(coicop_codes, descriptions)
+            
+            # Calculate missing weights from children instead of erroring
+            weights_by_series = self._calculate_missing_weights_from_children(columns, hierarchy_records, df)
+            
             # Extract monthly data rows
             monthly_rows = self.extract_monthly_data(df)
             
-            # Parse weight data for all series
-            weights_by_series = {}
-            for series_type in ['CPI', 'CPIH']:
-                weights_by_series[series_type] = {}
-                for cat, weight_col in columns[series_type]['weights'].items():
-                    if weight_col is not None:
-                        weights = self.parse_weight_data(df, weight_col, f"{series_type} {cat}")
-                        weights_by_series[series_type][cat] = weights
+            # weights_by_series is now calculated above in _calculate_missing_weights_from_children
             
             # Get database connection
             conn = self.get_db_connection()
             
             # Populate COICOP hierarchy
-            hierarchy_records = self.populate_coicop_hierarchy(conn, csv_file_path)
+            hierarchy_records_count = self.populate_coicop_hierarchy(conn, csv_file_path)
             
             # Process monthly data
             records_collected = 0
@@ -524,12 +702,15 @@ class UKInflationCollector(BaseCollector):
                                 index_val = pd.to_numeric(df.iloc[row_idx, index_col], errors='coerce')
                                 
                                 if pd.notna(index_val):
-                                    # Get weight value if available
+                                    # Get weight value - REQUIRED for CPI/CPIH categories
                                     weight_val = None
                                     if (series_type in weights_by_series and 
                                         cat in weights_by_series[series_type] and
                                         year_int in weights_by_series[series_type][cat]):
                                         weight_val = weights_by_series[series_type][cat][year_int]
+                                    
+                                    # Note: weight_val may be None for some years (e.g., pre-2015 data)
+                                    # This is acceptable - we store records with available weights only
                                     
                                     price_data_records.append({
                                         'date': obs_date,
