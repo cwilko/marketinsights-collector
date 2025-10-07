@@ -255,8 +255,8 @@ class UKInflationCollector(BaseCollector):
                     raise ValueError(f"CRITICAL ERROR: CPI WEIGHTS {coicop_code} (headline) column not found in MM23.csv - data integrity compromised")
             else:
                 # Flexible pattern for all COICOP categories (Level 1, 2, 3, 4)
-                # Pattern handles: "CPI WEIGHTS XX:", "CPI WEIGHTS XX Description", and "CPI WEIGHTS XX/YY Combined categories"
-                pattern = rf"CPI WEIGHTS {re.escape(coicop_code)}(?:/[0-9]+)*(?:\s*[:=-]|\s+[A-Za-z])"
+                # Pattern handles: "CPI WEIGHTS XX:", "CPI WEIGHTS XX Description", "CPI WEIGHTS XX/YY Combined categories", and "CPI WEIGHTS XX. :"
+                pattern = rf"CPI WEIGHTS {re.escape(coicop_code)}\.?(?:/[0-9]+)*(?:\s*[:=-]|\s+[A-Za-z])"
                 weight_col = self.find_column_by_regex(df, pattern)
                 if weight_col is not None:
                     columns['CPI']['weights'][coicop_code] = weight_col
@@ -295,8 +295,8 @@ class UKInflationCollector(BaseCollector):
                     raise ValueError(f"CRITICAL ERROR: CPIH WEIGHTS {coicop_code} (headline) column not found in MM23.csv - data integrity compromised")
             else:
                 # Flexible pattern for all COICOP categories (Level 1, 2, 3, 4)
-                # Pattern handles: "CPIH WEIGHTS XX:", "CPIH WEIGHTS XX Description", and "CPIH WEIGHTS XX/YY Combined categories"
-                pattern = rf"CPIH WEIGHTS {re.escape(coicop_code)}(?:/[0-9]+)*(?:\s*[:=-]|\s+[A-Za-z])"
+                # Pattern handles: "CPIH WEIGHTS XX:", "CPIH WEIGHTS XX Description", "CPIH WEIGHTS XX/YY Combined categories", and "CPIH WEIGHTS XX. :"
+                pattern = rf"CPIH WEIGHTS {re.escape(coicop_code)}\.?(?:/[0-9]+)*(?:\s*[:=-]|\s+[A-Za-z])"
                 weight_col = self.find_column_by_regex(df, pattern)
                 if weight_col is not None:
                     columns['CPIH']['weights'][coicop_code] = weight_col
