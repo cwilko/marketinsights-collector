@@ -401,11 +401,12 @@ class UKInflationCollector(BaseCollector):
         
         return int(sort_str) if sort_str else 0
 
-    def populate_coicop_hierarchy(self, conn) -> int:
+    def populate_coicop_hierarchy(self, conn, csv_file_path: str = None) -> int:
         """Populate the COICOP hierarchy table with all levels."""
         if conn is None:
             # In safe mode, we need to discover the hierarchy from the data
-            df = pd.read_csv('mm23.csv', header=None, low_memory=False) if hasattr(self, '_temp_df') else None
+            file_path = csv_file_path if csv_file_path else 'mm23.csv'
+            df = pd.read_csv(file_path, header=None, low_memory=False) if hasattr(self, '_temp_df') else None
             if df is not None:
                 coicop_codes = self.extract_all_coicop_codes(df)
                 descriptions = self.extract_coicop_descriptions_from_headers(df)
@@ -421,7 +422,8 @@ class UKInflationCollector(BaseCollector):
         try:
             # We need to re-read the data to extract all codes and descriptions
             # This is not ideal, but necessary for proper hierarchy building
-            df = pd.read_csv('mm23.csv', header=None, low_memory=False)
+            file_path = csv_file_path if csv_file_path else 'mm23.csv'
+            df = pd.read_csv(file_path, header=None, low_memory=False)
             coicop_codes = self.extract_all_coicop_codes(df)
             descriptions = self.extract_coicop_descriptions_from_headers(df)
             hierarchy_records = self.build_coicop_hierarchy_records(coicop_codes, descriptions)
@@ -494,7 +496,7 @@ class UKInflationCollector(BaseCollector):
             conn = self.get_db_connection()
             
             # Populate COICOP hierarchy
-            hierarchy_records = self.populate_coicop_hierarchy(conn)
+            hierarchy_records = self.populate_coicop_hierarchy(conn, csv_file_path)
             
             # Process monthly data
             records_collected = 0
