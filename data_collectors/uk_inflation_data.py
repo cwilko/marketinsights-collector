@@ -267,13 +267,13 @@ class UKInflationCollector(BaseCollector):
         
         # Find all CPIH columns (all COICOP levels)
         for coicop_code in all_coicop_codes.keys():
-            # CPIH INDEX columns - use regex to handle all formatting variations
+            # CPIH INDEX columns - use exact pattern matching to avoid partial matches
             if coicop_code == '00':
                 # Specific pattern for headline index
                 pattern = rf"CPIH INDEX {re.escape(coicop_code)}:\s*ALL ITEMS"
             else:
-                # Flexible pattern: CPIH INDEX XX - allow for combined categories and alphabetic suffixes
-                pattern = rf"CPIH INDEX {re.escape(coicop_code)}"
+                # Exact pattern: CPIH INDEX XX: or CPIH INDEX XX : (optional space before colon, no dots after code)
+                pattern = rf"CPIH INDEX {re.escape(coicop_code)}\s*:"
             
             cpih_col = self.find_column_by_regex(df, pattern)
             
