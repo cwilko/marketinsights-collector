@@ -428,6 +428,9 @@ class UKInflationCollector(BaseCollector):
             descriptions = self.extract_coicop_descriptions_from_headers(df)
             hierarchy_records = self.build_coicop_hierarchy_records(coicop_codes, descriptions)
             
+            # Sort hierarchy records by level to ensure parents are inserted before children
+            hierarchy_records = sorted(hierarchy_records, key=lambda x: x['level'])
+            
             # Insert all hierarchy records
             records_inserted = 0
             for record in hierarchy_records:
