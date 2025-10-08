@@ -272,8 +272,10 @@ class UKInflationCollector(BaseCollector):
                 # Specific pattern for headline index
                 pattern = rf"CPIH INDEX {re.escape(coicop_code)}:\s*ALL ITEMS"
             else:
-                # Exact pattern: CPIH INDEX XX: or CPIH INDEX XX : (optional space before colon, no dots after code)
-                pattern = rf"CPIH INDEX {re.escape(coicop_code)}\s*:"
+                # Precise pattern: CPIH INDEX XX followed by proper delimiter to avoid partial matches
+                # Matches: "CPIH INDEX XX:" (Level 1-3) or "CPIH INDEX XX " (Level 4 space-separated)
+                # Avoids: "CPIH INDEX XX.Y.Z.W" (sub-categories)
+                pattern = rf"CPIH INDEX {re.escape(coicop_code)}(?:\s*:|(?=\s+[A-Z][a-z]))"
             
             cpih_col = self.find_column_by_regex(df, pattern)
             
