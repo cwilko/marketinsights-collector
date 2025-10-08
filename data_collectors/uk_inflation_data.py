@@ -321,10 +321,16 @@ class UKInflationCollector(BaseCollector):
         header_row = df.iloc[0]
         
         # Pattern to match CPI INDEX columns and extract COICOP code and description
-        cpi_pattern = re.compile(r'CPI INDEX ([0-9.]+)\s*[:=-]\s*(.+?)\s+2015=100', re.IGNORECASE)
+        # Handles both formats: "CPI INDEX 01 : Description" and "CPI INDEX 01.1.1.1 Description"
+        cpi_pattern = re.compile(r'CPI INDEX ([0-9.]+)\s*[:=-]?\s*(.+?)\s+2015=100', re.IGNORECASE)
+        
+        # Also check CPIH INDEX headers for additional descriptions
+        cpih_pattern = re.compile(r'CPIH INDEX ([0-9.]+)\s*[:=-]?\s*(.+?)\s+2015=100', re.IGNORECASE)
         
         for i, header in enumerate(header_row):
             header_str = str(header)
+            
+            # Try CPI INDEX first
             match = cpi_pattern.search(header_str)
             if match:
                 coicop_code = match.group(1)
@@ -333,6 +339,19 @@ class UKInflationCollector(BaseCollector):
                 # Clean up description
                 description = description.replace('  ', ' ')  # Remove double spaces
                 descriptions[coicop_code] = description
+                continue
+            
+            # Try CPIH INDEX if CPI didn't match
+            match = cpih_pattern.search(header_str)
+            if match:
+                coicop_code = match.group(1)
+                description = match.group(2).strip()
+                
+                # Clean up description
+                description = description.replace('  ', ' ')  # Remove double spaces
+                # Only add if we don't already have this code from CPI
+                if coicop_code not in descriptions:
+                    descriptions[coicop_code] = description
         
         self.logger.info(f"Extracted descriptions for {len(descriptions)} COICOP categories")
         return descriptions
