@@ -800,8 +800,19 @@ class iSharesETFCollector(BaseCollector):
                     historical_data.columns = ['date', 'nav']
                     historical_data['etf_ticker'] = etf_ticker
                     
-                    # Clean and convert data types
-                    historical_data['date'] = pd.to_datetime(historical_data['date'])
+                    # Clean and convert data types with flexible date parsing
+                    # Handle both "Sep" and "Sept" formats (iShares format changes)
+                    def parse_dates_flexible(date_series):
+                        # First normalize "Sept" to "Sep" to match standard format
+                        normalized_dates = date_series.astype(str).str.replace('/Sept/', '/Sep/', regex=False)
+                        return pd.to_datetime(normalized_dates, format='%d/%b/%Y')
+                    
+                    try:
+                        historical_data['date'] = parse_dates_flexible(historical_data['date'])
+                    except ValueError:
+                        # Fallback to flexible parsing if normalization doesn't work
+                        historical_data['date'] = pd.to_datetime(historical_data['date'], format='mixed', dayfirst=True)
+                    
                     historical_data['nav'] = pd.to_numeric(historical_data['nav'], errors='coerce')
                     
                     # Remove rows with missing data
