@@ -639,6 +639,7 @@ class IndexLinkedGiltCollector(GiltMarketCollector):
             
             self.logger.info(f"Found {len(rows)} table rows to process")
             settlement_date = datetime.now()
+            non_tradeable_count = 0
             
             # Get header to understand structure
             if len(rows) > 0:
@@ -655,6 +656,12 @@ class IndexLinkedGiltCollector(GiltMarketCollector):
                     
                     if len(cells) < 5:
                         self.logger.debug(f"Row {i}: Skipping row with only {len(cells)} cells (need 5+)")
+                        continue
+                    
+                    # Check if bond is tradeable first (filter out bonds with "Online dealing is not available")
+                    if not self._is_bond_tradeable(row):
+                        non_tradeable_count += 1
+                        self.logger.debug(f"Row {i+1}: Skipping non-tradeable index-linked gilt")
                         continue
                     
                     # Extract bond data - index-linked gilt table structure
@@ -809,6 +816,8 @@ class IndexLinkedGiltCollector(GiltMarketCollector):
                     continue
             
             self.logger.info(f"Successfully scraped {len(bonds)} index-linked gilt prices")
+            if non_tradeable_count > 0:
+                self.logger.info(f"Filtered out {non_tradeable_count} non-tradeable index-linked gilts (showing 'Online dealing is not available')")
             rows_processed = len(rows) - 1  # Exclude header
             if rows_processed > len(bonds):
                 self.logger.info(f"Note: Found {rows_processed} data rows but only scraped {len(bonds)} bonds - {rows_processed - len(bonds)} rows were filtered out")
