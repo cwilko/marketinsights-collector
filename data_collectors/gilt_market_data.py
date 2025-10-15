@@ -1963,10 +1963,10 @@ def collect_ajbell_corporate_bond_prices(database_url=None):
                 collector.logger.error(f"Error processing AJ Bell corporate bond data: {str(e)}")
                 continue
         
-        # Bulk upsert all records
+        # Bulk upsert all records to AJ Bell specific table
         if bulk_data:
             success_count = collector.bulk_upsert_data(
-                "corporate_bond_prices", 
+                "ajbell_corporate_bond_prices", 
                 bulk_data,
                 conflict_columns=['bond_name', 'scraped_date']
             )
