@@ -1839,10 +1839,17 @@ class AJBellCorporateBondCollector(BaseCollector):
                     if isin_match:
                         isin = isin_match.group(0)
                     
-                    # Extract short code (between first | and second |)
+                    # Extract short code (after second |, which is the actual code)
                     parts = bond_name_full.split('|')
-                    if len(parts) >= 2:
-                        short_code = parts[1].strip()
+                    if len(parts) >= 3:
+                        short_code = parts[2].strip()  # Third part is the actual short code
+                    elif len(parts) >= 2:
+                        # Fallback: if only 2 parts, check if second part is ISIN or short code
+                        second_part = parts[1].strip()
+                        if re.match(r'^GB[A-Z0-9]{10}$', second_part):
+                            short_code = None  # Second part is ISIN, no short code available
+                        else:
+                            short_code = second_part  # Second part is the short code
                     
                     # Create combined_id following same format as HL
                     combined_id = None
@@ -1910,6 +1917,16 @@ def collect_ajbell_corporate_bond_prices(database_url=None):
         for bond in corporate_bond_data:
             try:
                 # Convert to database format matching corporate_bond_prices table structure
+                isin_value = str(bond['isin']) if bond['isin'] is not None else None
+                short_code_value = str(bond['short_code']) if bond['short_code'] is not None else None
+                
+                # Debug log field lengths to help identify constraint violations
+                if isin_value and len(isin_value) > 10:
+                    collector.logger.debug(f"ISIN longer than 10 chars for {bond['bond_name']}: '{isin_value}' ({len(isin_value)} chars)")
+                if short_code_value and len(short_code_value) > 10:
+                    collector.logger.warning(f"Short code longer than 10 chars for {bond['bond_name']}: '{short_code_value}' ({len(short_code_value)} chars) - truncating to 10 chars")
+                    short_code_value = short_code_value[:10]  # Truncate to fit VARCHAR(10) constraint
+                
                 data = {
                     'bond_name': str(bond['bond_name']) if bond['bond_name'] is not None else None,
                     'company_name': str(bond['company_name']) if bond['company_name'] is not None else None,
@@ -1924,8 +1941,8 @@ def collect_ajbell_corporate_bond_prices(database_url=None):
                     'credit_rating': str(bond['credit_rating']) if bond['credit_rating'] is not None else 'NR',
                     'scraped_date': bond['scraped_date'],
                     'currency_code': str(bond['currency_code']),
-                    'isin': str(bond['isin']) if bond['isin'] is not None else None,
-                    'short_code': str(bond['short_code']) if bond['short_code'] is not None else None,
+                    'isin': isin_value,
+                    'short_code': short_code_value,
                     'combined_id': str(bond['combined_id']) if bond['combined_id'] is not None else None
                 }
                 bulk_data.append(data)
