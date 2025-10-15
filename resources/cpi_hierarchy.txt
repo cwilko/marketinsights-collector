@@ -1,0 +1,119 @@
+## Complete CPI/CPIH Hierarchical Structure (COICOP Classification)
+
+### Level 1 - 13 categories
+
+- **00**: ALL ITEMS
+- **01**: FOOD AND NON-ALCOHOLIC BEVERAGES
+- **02**: ALCOHOLIC BEVERAGES,TOBACCO & NARCOTICS
+- **03**: CLOTHING AND FOOTWEAR
+- **04**: HOUSING, WATER AND FUELS
+- **05**: FURN, HH EQUIP & ROUTINE REPAIR OF HOUSE
+- **06**: HEALTH
+- **07**: TRANSPORT
+- **08**: COMMUNICATION
+- **09**: RECREATION & CULTURE
+- **10**: EDUCATION
+- **11**: HOTELS, CAFES AND RESTAURANTS
+- **12**: MISCELLANEOUS GOODS AND SERVICES
+
+### Level 2 - 37 categories
+
+- **01.1**: FOOD
+- **01.2**: NON-ALCOHOLIC BEVERAGES
+- **02.1**: ALCOHOLIC BEVERAGES
+- **02.2**: TOBACCO
+- **03.1**: CLOTHING
+- **03.2**: FOOTWEAR INCLUDING REPAIRS
+- **04.1**: ACTUAL RENTS FOR HOUSING
+- **04.3**: REGULAR MAINTENANCE AND REPAIR OF THE DWELLING
+- **04.4**: Water supply and misc. services for the dwelling
+- **04.5**: ELECTRICITY, GAS AND OTHER FUELS
+- **05.1**: Furniture, furnishings and carpets
+- **05.2**: HOUSEHOLD TEXTILES
+- **05.3**: Household appliances, fitting and repairs
+- **05.4**: GLASSWARE, TABLEWARE AND HOUSEHOLD UTENSILS
+- **05.5**: TOOLS AND EQUIPMENT FOR HOUSE AND GARDEN
+- **05.6**: Goods and services for routine maintenance
+- **06.1**: MEDICAL PRODUCTS APPLIANCES AND EQUIPMENT
+- **06.2**: OUT-PATIENT SERVICES:
+- **06.3**: HOSPITAL SERVICES
+- **07.1**: PURCHASE OF VEHICLES
+- **07.2**: OPERATION OF PERSONAL TRANSPORT EQUIPMENT
+- **07.3**: TRANSPORT SERVICES
+- **08.1**: POSTAL SERVICES
+- **09.1**: Audio-visual equipment and related products
+- **09.2**: OTHER MAJOR DURABLES FOR RECREATION AND CULTURE
+- **09.3**: OTHER RECREATIONAL ITEMS AND EQUIPMENT GARDENS & PETS
+- **09.4**: RECREATIONAL AND CULTURAL SERVICES
+- **09.5**: Books, newspapers and stationery
+- **09.6**: PACKAGE HOLIDAY
+- **11.1**: Catering services
+- **11.2**: ACCOMMODATION SERVICES
+- **12.1**: PERSONAL CARE
+- **12.3**: PERSONAL EFFECTS N.E.C.
+- **12.4**: SOCIAL PROTECTION
+- **12.5**: INSURANCE
+- **12.6**: FINANCIAL SERVICES N.E.C.
+- **12.7**: OTHER SERVICES NEC
+
+### Level 3 - 59 categories
+
+- **01.1.1**: BREAD & CEREALS
+- **01.1.2**: MEAT
+- **01.1.3**: FISH
+- **01.1.4**: MILK, CHEESE & EGGS
+- **01.1.5**: OILS & FATS
+- **01.1.6**: FRUIT
+- **01.1.7**: VEGETABLES INCLUDING POTATOES AND OTHER TUBERS
+- **01.1.8**: SUGAR, JAM, HONEY, SYRUPS, CHOCOLATE & CONFECTIONERY
+- **01.1.9**: FOOD PRODUCTS
+- **01.2.1**: COFFEE, TEA, COCOA
+- **01.2.2**: MINERAL WATERS, SOFT DRINKS AND JUICES
+- **02.1.1**: SPIRITS
+- **02.1.2**: WINE
+- **02.1.3**: BEER
+- **03.1.2**: GARMENTS
+- **03.1.3**: OTHER ARTICLES OF CLOTHING & ACCESSORIES
+- **03.1.4**: Cleaning, repair and hire of clothing
+- **04.3.1**: Materials for maintenance and repair
+- **04.3.2**: Services for maintenance and repair
+- **04.4.1**: WATER SUPPLY
+- **04.4.3**: SEWERAGE COLLECTION
+- **04.5.1**: ELECTRICITY
+- **04.5.2**: GAS
+- **04.5.3**: LIQUID FUELS
+- **04.5.4**: SOLID FUELS
+- **05.1.1**: Furniture and furnishings
+- **05.1.2**: CARPETS & OTHER FLOOR COVERINGS
+- **05.3.3**: REPAIR OF HOUSEHOLD APPLIANCES
+- **05.6.1**: NON-DURABLE HOUSEHOLD GOODS
+- **05.6.2**: Domestic services and household services
+- **06.1.1**: PHARMACEUTICAL PRODUCTS
+- **06.2.2**: DENTAL SERVICES:
+- **07.2.1**: SPARE PARTS & ACCESSORIES
+- **07.2.2**: FUELS & LUBRICANTS
+- **07.2.3**: MAINTENANCE & REPAIRS
+- **07.2.4**: OTHER SERVICES
+- **07.3.1**: PASSENGER TRANSPORT BY RAILWAY
+- **07.3.3**: PASSENGER TRANSPORT BY AIR
+- **07.3.4**: PASSENGER TRANSPORT BY SEA AND INLAND WATERWAY
+- **09.1.1**: Reception and reproduction of sound and pictures
+- **09.1.2**: PHOTOGRAPHIC, CINEMATOGRAPHIC & OPTICAL EQUIPMENT
+- **09.1.3**: Data processing equipment
+- **09.1.4**: RECORDING MEDIA
+- **09.1.5**: Repair of audio-visual equipment & related products
+- **09.3.1**: GAMES TOYS AND HOBBIES
+- **09.3.2**: EQUIPMENT FOR SPORT CAMPING AND OPEN-AIR RECREATION
+- **09.3.3**: GARDEN PLANTS AND FLOWERS
+- **09.4.1**: RECREATIONAL AND SPORTING SERVICES
+- **09.4.2**: CULTURAL SERVICES
+- **09.5.1**: BOOKS
+- **09.5.2**: NEWSPAPERS AND PERIODICALS
+- **11.1.1**: RESTAURANTS & CAFES
+- **11.1.2**: CANTEENS
+- **12.1.1**: Hairdressing and personal grooming establishments
+- **12.3.1**: JEWELLERY CLOCKS AND WATCHES
+- **12.3.2**: OTHER PERSONAL EFFECTS
+- **12.5.2**: House contents insurance
+- **12.5.4**: Transport insurance
+- **12.6.2**: Other financial services (nec)

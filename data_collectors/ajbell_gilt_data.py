@@ -477,7 +477,10 @@ class AJBellGiltCollector(BaseCollector):
                             dirty_price=dirty_price,
                             face_value=face_value,
                             coupon_rate=coupon_rate,
-                            years_to_maturity=years_to_maturity
+                            years_to_maturity=years_to_maturity,
+                            bond_name=bond_name,
+                            isin=isin,
+                            short_code=short_code
                         )
                         
                         # Calculate after-tax YTM
@@ -486,11 +489,15 @@ class AJBellGiltCollector(BaseCollector):
                             face_value=face_value,
                             coupon_rate=coupon_rate,
                             years_to_maturity=years_to_maturity,
-                            tax_rate_on_coupons=0.30  # 30% tax on coupons
+                            tax_rate_on_coupons=0.30,  # 30% tax on coupons
+                            bond_name=bond_name,
+                            isin=isin,
+                            short_code=short_code
                         )
                         
                     except Exception as calc_error:
-                        self.logger.warning(f"Error calculating derived values for {bond_name}: {calc_error}")
+                        bond_id = f"{bond_name} (ISIN: {isin}, Code: {short_code})" if isin or short_code else bond_name
+                        self.logger.warning(f"Error calculating derived values for {bond_id}: {calc_error}")
                         # Keep None values for failed calculations
                     
                     # Create combined_id following same format as HL
@@ -522,7 +529,13 @@ class AJBellGiltCollector(BaseCollector):
                     gilt_data.append(gilt_record)
                     
                 except Exception as e:
-                    self.logger.warning(f"Error parsing AJ Bell row {i+1}: {e}")
+                    # Try to get bond name for better error identification
+                    try:
+                        cells = row.find_elements(By.TAG_NAME, "td")
+                        bond_name_full = cells[name_col].text.strip() if name_col is not None and name_col < len(cells) else "Unknown"
+                        self.logger.warning(f"Error parsing AJ Bell row {i+1} ({bond_name_full}): {e}")
+                    except:
+                        self.logger.warning(f"Error parsing AJ Bell row {i+1}: {e}")
                     continue
             
             self.logger.info(f"Successfully parsed {len(gilt_data)} AJ Bell gilt records")
@@ -616,7 +629,8 @@ class AJBellGiltCollector(BaseCollector):
     
     def calculate_ytm_from_dirty(self, dirty_price: float, face_value: float, 
                                coupon_rate: float, years_to_maturity: float, 
-                               payments_per_year: int = 2) -> Optional[float]:
+                               payments_per_year: int = 2, bond_name: str = "Unknown", 
+                               isin: str = None, short_code: str = None) -> Optional[float]:
         """Calculate YTM using dirty price."""
         if fsolve is None:
             self.logger.warning("scipy not available - cannot calculate YTM")
@@ -627,7 +641,8 @@ class AJBellGiltCollector(BaseCollector):
         
         # Handle edge case where bond has essentially no time remaining
         if total_periods <= 0.01:  # Less than ~3.6 days remaining
-            self.logger.warning(f"Bond has minimal time remaining (years_to_maturity: {years_to_maturity})")
+            bond_id = f"{bond_name} (ISIN: {isin}, Code: {short_code})" if isin or short_code else bond_name
+            self.logger.warning(f"Bond {bond_id} has minimal time remaining (years_to_maturity: {years_to_maturity})")
             return None
         
         def bond_price_equation(ytm):
@@ -657,17 +672,20 @@ class AJBellGiltCollector(BaseCollector):
             if -0.5 <= ytm_solution <= 1.0:
                 return ytm_solution
             else:
-                self.logger.warning(f"YTM calculation returned unreasonable value: {ytm_solution*100:.2f}%")
+                bond_id = f"{bond_name} (ISIN: {isin}, Code: {short_code})" if isin or short_code else bond_name
+                self.logger.warning(f"YTM calculation returned unreasonable value: {ytm_solution*100:.2f}% for {bond_id}")
                 return None
                 
         except Exception as e:
-            self.logger.warning(f"YTM calculation failed: {str(e)}")
+            bond_id = f"{bond_name} (ISIN: {isin}, Code: {short_code})" if isin or short_code else bond_name
+            self.logger.warning(f"YTM calculation failed for {bond_id}: {str(e)}")
             return None
     
     def calculate_after_tax_ytm(self, dirty_price: float, face_value: float, 
                               coupon_rate: float, years_to_maturity: float, 
                               tax_rate_on_coupons: float = 0.30, 
-                              payments_per_year: int = 2) -> Optional[float]:
+                              payments_per_year: int = 2, bond_name: str = "Unknown", 
+                              isin: str = None, short_code: str = None) -> Optional[float]:
         """
         Calculate after-tax YTM where:
         - Coupon payments are taxed at tax_rate_on_coupons
@@ -697,8 +715,18 @@ class AJBellGiltCollector(BaseCollector):
         
         try:
             ytm_solution = fsolve(after_tax_bond_equation, initial_guess)[0]
-            return ytm_solution
-        except:
+            
+            # Sanity check: After-tax YTM should be reasonable (between -50% and 100%)
+            if -0.5 <= ytm_solution <= 1.0:
+                return ytm_solution
+            else:
+                bond_id = f"{bond_name} (ISIN: {isin}, Code: {short_code})" if isin or short_code else bond_name
+                self.logger.warning(f"After-tax YTM calculation returned unreasonable value: {ytm_solution*100:.2f}% for {bond_id}")
+                return None
+                
+        except Exception as e:
+            bond_id = f"{bond_name} (ISIN: {isin}, Code: {short_code})" if isin or short_code else bond_name
+            self.logger.warning(f"After-tax YTM calculation failed for {bond_id}: {str(e)}")
             return None
 
 
@@ -722,13 +750,13 @@ def collect_ajbell_gilt_prices(database_url=None):
                 data = {
                     'bond_name': str(gilt['bond_name']) if gilt['bond_name'] is not None else None,
                     'clean_price': float(gilt['clean_price']) if gilt['clean_price'] is not None else None,
-                    'accrued_interest': gilt['accrued_interest'],  # None for AJ Bell
-                    'dirty_price': gilt['dirty_price'],            # None for AJ Bell
+                    'accrued_interest': float(gilt['accrued_interest']) if gilt['accrued_interest'] is not None else None,
+                    'dirty_price': float(gilt['dirty_price']) if gilt['dirty_price'] is not None else None,
                     'coupon_rate': float(gilt['coupon_rate']) if gilt['coupon_rate'] is not None else None,
                     'maturity_date': gilt['maturity_date'].date(),
                     'years_to_maturity': float(gilt['years_to_maturity']) if gilt['years_to_maturity'] is not None else None,
-                    'ytm': gilt['ytm'],                           # None for AJ Bell
-                    'after_tax_ytm': gilt['after_tax_ytm'],       # None for AJ Bell
+                    'ytm': float(gilt['ytm']) if gilt['ytm'] is not None else None,
+                    'after_tax_ytm': float(gilt['after_tax_ytm']) if gilt['after_tax_ytm'] is not None else None,
                     'scraped_date': gilt['scraped_date'],
                     'currency_code': str(gilt['currency_code']),
                     'isin': str(gilt['isin']) if gilt['isin'] is not None else None,
