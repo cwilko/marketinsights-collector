@@ -275,17 +275,10 @@ class GiltMarketCollector(BaseCollector):
             actions_cell = cells[4]
             action_elements = actions_cell.find_elements(By.TAG_NAME, "a") + actions_cell.find_elements(By.TAG_NAME, "button")
             
-            # Debug logging to understand what's happening
-            actions_text = actions_cell.text.strip()
-            self.logger.debug(f"Actions cell text: '{actions_text}', Elements found: {len(action_elements)}")
-            
             for element in action_elements:
                 element_title = element.get_attribute("title") or ""
-                element_text = element.text.strip()
-                self.logger.debug(f"Action element - Title: '{element_title}', Text: '{element_text}'")
-                
                 if "not available" in element_title.lower():
-                    self.logger.info(f"Bond not tradeable - Title: '{element_title}'")
+                    self.logger.debug(f"Bond not tradeable - Title: '{element_title}'")
                     return False
             
             return True
@@ -463,12 +456,10 @@ class GiltMarketCollector(BaseCollector):
                 if len(cells) >= 4:
                     try:
                         # Check if bond is tradeable first (filter out bonds with "Online dealing is not available")
-                        # TEMPORARY: Log what's happening but don't filter yet
-                        is_tradeable = self._is_bond_tradeable(row)
-                        if not is_tradeable:
+                        if not self._is_bond_tradeable(row):
                             non_tradeable_count += 1
-                            self.logger.info(f"Row {i+1}: Would skip non-tradeable gilt (but continuing for debugging)")
-                            # continue  # COMMENTED OUT for debugging
+                            self.logger.info(f"Row {i+1}: Skipping non-tradeable gilt")
+                            continue
                         
                         # Get bond name/issuer and link information
                         bond_name_cell = cells[issuer_col]
@@ -704,12 +695,10 @@ class IndexLinkedGiltCollector(GiltMarketCollector):
                         continue
                     
                     # Check if bond is tradeable first (filter out bonds with "Online dealing is not available")
-                    # TEMPORARY: Log what's happening but don't filter yet
-                    is_tradeable = self._is_bond_tradeable(row)
-                    if not is_tradeable:
+                    if not self._is_bond_tradeable(row):
                         non_tradeable_count += 1
-                        self.logger.info(f"Row {i+1}: Would skip non-tradeable index-linked gilt (but continuing for debugging)")
-                        # continue  # COMMENTED OUT for debugging
+                        self.logger.info(f"Row {i+1}: Skipping non-tradeable index-linked gilt")
+                        continue
                     
                     # Extract bond data - index-linked gilt table structure
                     bond_name_cell = cells[0]
