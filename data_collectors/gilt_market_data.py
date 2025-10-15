@@ -162,20 +162,22 @@ class GiltMarketCollector(BaseCollector):
         year = settlement_date.year
         
         # Calculate the two coupon dates per year (6 months apart)
-        if mat_month <= 6:
-            coupon1 = datetime(year, mat_month, mat_day)
-            coupon2 = datetime(year, mat_month + 6, mat_day)
-        else:
-            coupon1 = datetime(year, mat_month - 6, mat_day)
-            coupon2 = datetime(year, mat_month, mat_day)
-        
-        # Handle edge cases for day of month
+        # Apply day limits upfront to avoid invalid dates
         try:
-            coupon1 = datetime(year, coupon1.month, min(coupon1.day, 28))
-            coupon2 = datetime(year, coupon2.month, min(coupon2.day, 28))
-        except:
-            coupon1 = datetime(year, coupon1.month, 28)
-            coupon2 = datetime(year, coupon2.month, 28)
+            if mat_month <= 6:
+                coupon1 = datetime(year, mat_month, min(mat_day, 28))
+                coupon2 = datetime(year, mat_month + 6, min(mat_day, 28))
+            else:
+                coupon1 = datetime(year, mat_month - 6, min(mat_day, 28))
+                coupon2 = datetime(year, mat_month, min(mat_day, 28))
+        except ValueError:
+            # Fallback to safe dates if still invalid
+            if mat_month <= 6:
+                coupon1 = datetime(year, mat_month, 28)
+                coupon2 = datetime(year, mat_month + 6, 28)
+            else:
+                coupon1 = datetime(year, mat_month - 6, 28)
+                coupon2 = datetime(year, mat_month, 28)
         
         # Find the most recent coupon date before settlement
         if settlement_date >= coupon2:
@@ -1467,6 +1469,8 @@ class AJBellCorporateBondCollector(BaseCollector):
             '%d/%m/%Y',      # 04/12/2025
             '%d-%m-%Y',      # 04-12-2025
             '%Y-%m-%d',      # 2025-12-04
+            '%d/%m/%y',      # 31/10/27 (2-digit year)
+            '%d-%m-%y',      # 31-10-27 (2-digit year)
         ]
         
         for fmt in date_formats:
@@ -1516,20 +1520,22 @@ class AJBellCorporateBondCollector(BaseCollector):
         year = settlement_date.year
         
         # Calculate the two coupon dates per year (6 months apart)
-        if mat_month <= 6:
-            coupon1 = datetime(year, mat_month, mat_day)
-            coupon2 = datetime(year, mat_month + 6, mat_day)
-        else:
-            coupon1 = datetime(year, mat_month - 6, mat_day)
-            coupon2 = datetime(year, mat_month, mat_day)
-        
-        # Handle edge cases for day of month
+        # Apply day limits upfront to avoid invalid dates
         try:
-            coupon1 = datetime(year, coupon1.month, min(coupon1.day, 28))
-            coupon2 = datetime(year, coupon2.month, min(coupon2.day, 28))
-        except:
-            coupon1 = datetime(year, coupon1.month, 28)
-            coupon2 = datetime(year, coupon2.month, 28)
+            if mat_month <= 6:
+                coupon1 = datetime(year, mat_month, min(mat_day, 28))
+                coupon2 = datetime(year, mat_month + 6, min(mat_day, 28))
+            else:
+                coupon1 = datetime(year, mat_month - 6, min(mat_day, 28))
+                coupon2 = datetime(year, mat_month, min(mat_day, 28))
+        except ValueError:
+            # Fallback to safe dates if still invalid
+            if mat_month <= 6:
+                coupon1 = datetime(year, mat_month, 28)
+                coupon2 = datetime(year, mat_month + 6, 28)
+            else:
+                coupon1 = datetime(year, mat_month - 6, 28)
+                coupon2 = datetime(year, mat_month, 28)
         
         # Find the most recent coupon date before settlement
         if settlement_date >= coupon2:
@@ -1788,6 +1794,27 @@ class AJBellCorporateBondCollector(BaseCollector):
                     # Determine face value for calculations
                     face_value = self._determine_face_value(clean_price)
                     
+                    # Extract ISIN and short codes for debugging
+                    isin = None
+                    short_code = None
+                    
+                    # Look for ISIN pattern (2 letters + 10 alphanumeric)
+                    isin_match = re.search(r'[A-Z]{2}[A-Z0-9]{10}', bond_name_full)
+                    if isin_match:
+                        isin = isin_match.group(0)
+                    
+                    # Extract short code (after second |, which is the actual code)
+                    parts = bond_name_full.split('|')
+                    if len(parts) >= 3:
+                        short_code = parts[2].strip()  # Third part is the actual short code
+                    elif len(parts) >= 2:
+                        # Fallback: if only 2 parts, check if second part is ISIN or short code
+                        second_part = parts[1].strip()
+                        if re.match(r'^GB[A-Z0-9]{10}$', second_part):
+                            short_code = None  # Second part is ISIN, no short code available
+                        else:
+                            short_code = second_part  # Second part is the short code
+                    
                     # Calculate accrued interest and dirty price
                     accrued_interest = None
                     dirty_price = None
@@ -1827,29 +1854,14 @@ class AJBellCorporateBondCollector(BaseCollector):
                         )
                         
                     except Exception as calc_error:
-                        self.logger.warning(f"Error calculating derived values for {bond_name}: {calc_error}")
-                        # Keep None values for failed calculations
+                        self.logger.error(f"Failed to calculate critical values for {bond_name} (ISIN: {isin}, Short Code: {short_code}): {calc_error}")
+                        # Skip this bond rather than storing incorrect financial data
+                        continue
                     
-                    # Extract ISIN and short codes
-                    isin = None
-                    short_code = None
-                    
-                    # Look for ISIN pattern (2 letters + 10 alphanumeric)
-                    isin_match = re.search(r'[A-Z]{2}[A-Z0-9]{10}', bond_name_full)
-                    if isin_match:
-                        isin = isin_match.group(0)
-                    
-                    # Extract short code (after second |, which is the actual code)
-                    parts = bond_name_full.split('|')
-                    if len(parts) >= 3:
-                        short_code = parts[2].strip()  # Third part is the actual short code
-                    elif len(parts) >= 2:
-                        # Fallback: if only 2 parts, check if second part is ISIN or short code
-                        second_part = parts[1].strip()
-                        if re.match(r'^GB[A-Z0-9]{10}$', second_part):
-                            short_code = None  # Second part is ISIN, no short code available
-                        else:
-                            short_code = second_part  # Second part is the short code
+                    # Validate that critical calculations succeeded
+                    if accrued_interest is None or dirty_price is None:
+                        self.logger.error(f"Critical calculations failed for {bond_name} (ISIN: {isin}, Short Code: {short_code}): accrued_interest={accrued_interest}, dirty_price={dirty_price}")
+                        continue
                     
                     # Create combined_id following same format as HL
                     combined_id = None
@@ -1861,14 +1873,14 @@ class AJBellCorporateBondCollector(BaseCollector):
                     corporate_bond_record = {
                         'bond_name': bond_name,
                         'company_name': company_name,
-                        'clean_price': clean_price,
-                        'accrued_interest': accrued_interest,
-                        'dirty_price': dirty_price,
-                        'coupon_rate': coupon_rate,
+                        'clean_price': float(clean_price),
+                        'accrued_interest': float(accrued_interest),
+                        'dirty_price': float(dirty_price),
+                        'coupon_rate': float(coupon_rate),
                         'maturity_date': maturity_date,
-                        'years_to_maturity': years_to_maturity,
-                        'ytm': ytm,
-                        'after_tax_ytm': after_tax_ytm,
+                        'years_to_maturity': float(years_to_maturity),
+                        'ytm': float(ytm) if ytm is not None else None,
+                        'after_tax_ytm': float(after_tax_ytm) if after_tax_ytm is not None else None,
                         'credit_rating': 'NR',  # AJ Bell doesn't provide credit ratings
                         'isin': isin,
                         'short_code': short_code,
