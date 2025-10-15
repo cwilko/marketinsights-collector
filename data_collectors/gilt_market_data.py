@@ -394,6 +394,7 @@ class GiltMarketCollector(BaseCollector):
             
             bonds = []
             settlement_date = datetime.now()
+            non_tradeable_count = 0
             
             # Look for table rows directly
             rows = driver.find_elements(By.CSS_SELECTOR, "table tr")
@@ -418,6 +419,12 @@ class GiltMarketCollector(BaseCollector):
                 
                 if len(cells) >= 4:
                     try:
+                        # Check if bond is tradeable first (filter out bonds with "Online dealing is not available")
+                        if not self._is_bond_tradeable(row):
+                            non_tradeable_count += 1
+                            self.logger.debug(f"Row {i+1}: Skipping non-tradeable gilt")
+                            continue
+                        
                         # Get bond name/issuer and link information
                         bond_name_cell = cells[issuer_col]
                         bond_name_text = bond_name_cell.text.strip()  # Full cell text (includes ISIN)
@@ -521,6 +528,8 @@ class GiltMarketCollector(BaseCollector):
                         continue
             
             self.logger.info(f"Successfully scraped {len(bonds)} gilt market prices")
+            if non_tradeable_count > 0:
+                self.logger.info(f"Filtered out {non_tradeable_count} non-tradeable gilts (showing 'Online dealing is not available')")
             return bonds
             
         except Exception as e:
