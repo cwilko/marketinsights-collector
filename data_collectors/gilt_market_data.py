@@ -251,6 +251,49 @@ class GiltMarketCollector(BaseCollector):
         
         return identifiers
     
+    def _is_bond_tradeable(self, row_element) -> bool:
+        """
+        Check if a bond can be traded online.
+        
+        Filters out bonds that have "Online dealing is not available" indicators
+        in their action elements.
+        
+        Args:
+            row_element: Selenium WebElement representing the table row
+            
+        Returns:
+            bool: True if bond can be traded, False otherwise
+        """
+        try:
+            cells = row_element.find_elements(By.TAG_NAME, "td")
+            
+            if len(cells) < 5:  # Need at least 5 columns including Actions
+                self.logger.debug(f"Row has only {len(cells)} cells, skipping (need 5+ for Actions column)")
+                return False
+            
+            # Check Actions column (column 4) for disabled indicators
+            actions_cell = cells[4]
+            action_elements = actions_cell.find_elements(By.TAG_NAME, "a") + actions_cell.find_elements(By.TAG_NAME, "button")
+            
+            # Debug logging to understand what's happening
+            actions_text = actions_cell.text.strip()
+            self.logger.debug(f"Actions cell text: '{actions_text}', Elements found: {len(action_elements)}")
+            
+            for element in action_elements:
+                element_title = element.get_attribute("title") or ""
+                element_text = element.text.strip()
+                self.logger.debug(f"Action element - Title: '{element_title}', Text: '{element_text}'")
+                
+                if "not available" in element_title.lower():
+                    self.logger.info(f"Bond not tradeable - Title: '{element_title}'")
+                    return False
+            
+            return True
+            
+        except Exception as e:
+            self.logger.warning(f"Error checking bond tradeability: {str(e)}")
+            return False  # Safe default - skip if we can't determine
+    
     def calculate_ytm_from_dirty(self, dirty_price: float, face_value: float, 
                                coupon_rate: float, years_to_maturity: float, 
                                payments_per_year: int = 2) -> Optional[float]:
@@ -420,10 +463,12 @@ class GiltMarketCollector(BaseCollector):
                 if len(cells) >= 4:
                     try:
                         # Check if bond is tradeable first (filter out bonds with "Online dealing is not available")
-                        if not self._is_bond_tradeable(row):
+                        # TEMPORARY: Log what's happening but don't filter yet
+                        is_tradeable = self._is_bond_tradeable(row)
+                        if not is_tradeable:
                             non_tradeable_count += 1
-                            self.logger.debug(f"Row {i+1}: Skipping non-tradeable gilt")
-                            continue
+                            self.logger.info(f"Row {i+1}: Would skip non-tradeable gilt (but continuing for debugging)")
+                            # continue  # COMMENTED OUT for debugging
                         
                         # Get bond name/issuer and link information
                         bond_name_cell = cells[issuer_col]
@@ -659,10 +704,12 @@ class IndexLinkedGiltCollector(GiltMarketCollector):
                         continue
                     
                     # Check if bond is tradeable first (filter out bonds with "Online dealing is not available")
-                    if not self._is_bond_tradeable(row):
+                    # TEMPORARY: Log what's happening but don't filter yet
+                    is_tradeable = self._is_bond_tradeable(row)
+                    if not is_tradeable:
                         non_tradeable_count += 1
-                        self.logger.debug(f"Row {i+1}: Skipping non-tradeable index-linked gilt")
-                        continue
+                        self.logger.info(f"Row {i+1}: Would skip non-tradeable index-linked gilt (but continuing for debugging)")
+                        # continue  # COMMENTED OUT for debugging
                     
                     # Extract bond data - index-linked gilt table structure
                     bond_name_cell = cells[0]
@@ -906,41 +953,6 @@ class CorporateBondCollector(GiltMarketCollector):
         self.base_url = "https://www.hl.co.uk/shares/corporate-bonds-gilts/bond-prices/gbp-bonds"
         # Override the chrome options to use different debug port
         self.chrome_options.add_argument("--remote-debugging-port=9224")
-    
-    def _is_bond_tradeable(self, row_element) -> bool:
-        """
-        Check if a corporate bond can be traded online.
-        
-        Filters out bonds that have "Online dealing is not available" indicators
-        in their action elements.
-        
-        Args:
-            row_element: Selenium WebElement representing the table row
-            
-        Returns:
-            bool: True if bond can be traded, False otherwise
-        """
-        try:
-            cells = row_element.find_elements(By.TAG_NAME, "td")
-            
-            if len(cells) < 5:  # Need at least 5 columns including Actions
-                return False
-            
-            # Check Actions column (column 4) for disabled indicators
-            actions_cell = cells[4]
-            action_elements = actions_cell.find_elements(By.TAG_NAME, "a") + actions_cell.find_elements(By.TAG_NAME, "button")
-            
-            for element in action_elements:
-                element_title = element.get_attribute("title") or ""
-                if "not available" in element_title.lower():
-                    self.logger.debug(f"Bond not tradeable: {element_title}")
-                    return False
-            
-            return True
-            
-        except Exception as e:
-            self.logger.debug(f"Error checking bond tradeability: {str(e)}")
-            return False  # Safe default - skip if we can't determine
     
     def scrape_corporate_bond_prices(self) -> List[Dict[str, Any]]:
         """Scrape GBP Corporate Bonds and calculate yields with credit analysis."""
