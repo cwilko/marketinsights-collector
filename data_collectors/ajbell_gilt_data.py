@@ -513,8 +513,15 @@ class AJBellGiltCollector(BaseCollector):
                         
                     except Exception as calc_error:
                         bond_id = f"{bond_name} (ISIN: {isin}, Code: {short_code})" if isin or short_code else bond_name
-                        self.logger.warning(f"Error calculating derived values for {bond_id}: {calc_error}")
-                        # Keep None values for failed calculations
+                        self.logger.error(f"Failed to calculate critical values for {bond_id}: {calc_error}")
+                        # Skip this bond rather than storing incorrect financial data
+                        continue
+                    
+                    # Validate that critical calculations succeeded
+                    if accrued_interest is None or dirty_price is None or ytm is None:
+                        bond_id = f"{bond_name} (ISIN: {isin}, Code: {short_code})" if isin or short_code else bond_name
+                        self.logger.error(f"Critical calculations failed for {bond_id}: accrued_interest={accrued_interest}, dirty_price={dirty_price}, ytm={ytm}")
+                        continue
                     
                     # Create combined_id following same format as HL
                     combined_id = None
