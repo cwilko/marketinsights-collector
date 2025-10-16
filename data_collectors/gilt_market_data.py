@@ -570,7 +570,7 @@ class GiltMarketCollector(BaseCollector):
             
         except Exception as e:
             self.logger.error(f"Scraping error: {e}")
-            return []
+            raise RuntimeError(f"Gilt market scraping failed: {e}") from e
         finally:
             if driver:
                 try:
@@ -861,7 +861,7 @@ class IndexLinkedGiltCollector(GiltMarketCollector):
         
         except Exception as e:
             self.logger.error(f"Scraping error: {e}")
-            return []
+            raise RuntimeError(f"Index-linked gilt scraping failed: {e}") from e
         finally:
             if driver:
                 try:
@@ -1157,7 +1157,7 @@ class CorporateBondCollector(GiltMarketCollector):
         
         except Exception as e:
             self.logger.error(f"Scraping error: {e}")
-            return []
+            raise RuntimeError(f"Corporate bond scraping failed: {e}") from e
         finally:
             if driver:
                 try:
