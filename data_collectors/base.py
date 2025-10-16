@@ -84,7 +84,7 @@ class BaseCollector:
             
         except Exception as e:
             self.logger.error(f"Failed to upsert data to {table}: {str(e)}")
-            return False
+            raise RuntimeError(f"Database upsert failed for {table}: {e}") from e
         finally:
             if conn:  # Always close connection if we created one
                 conn.close()
@@ -196,8 +196,8 @@ class BaseCollector:
                 result = cur.fetchone()
                 return result[0] if result and result[0] else None
         except Exception as e:
-            self.logger.warning(f"Could not get last record date from {table}: {str(e)}")
-            return None
+            self.logger.error(f"Database query failed for {table}: {str(e)}")
+            raise RuntimeError(f"Database query failed for {table}: {e}") from e
         finally:
             if conn:
                 conn.close()
@@ -220,8 +220,8 @@ class BaseCollector:
                 result = cur.fetchone()
                 return result[0] if result else False
         except Exception as e:
-            self.logger.warning(f"Could not check if table {table} exists: {str(e)}")
-            return False
+            self.logger.error(f"Database table check failed for {table}: {str(e)}")
+            raise RuntimeError(f"Database table check failed for {table}: {e}") from e
         finally:
             if conn:
                 conn.close()
