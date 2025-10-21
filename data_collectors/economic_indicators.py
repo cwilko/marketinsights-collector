@@ -2346,8 +2346,31 @@ class UKGDPSectorWeightsCollector(BaseCollector):
         self.logger.info(f"Extracting sector weights from: {file_path}")
         
         try:
+            import openpyxl
+            import re
+            
+            # Find the worksheet that matches BB## - CURRENT PRICE & VOLUME pattern
+            wb = openpyxl.load_workbook(file_path, read_only=True)
+            sheet_name = None
+            bb_year = None
+            
+            # Look for sheet names matching BB## - CURRENT PRICE & VOLUME pattern
+            bb_pattern = re.compile(r'BB(\d{2}) - CURRENT PRICE & VOLUME', re.IGNORECASE)
+            for name in wb.sheetnames:
+                match = bb_pattern.match(name)
+                if match:
+                    sheet_name = name
+                    bb_year = f"BB{match.group(1)}"
+                    self.logger.info(f"Found sector weights sheet: {sheet_name} (version: {bb_year})")
+                    break
+            
+            wb.close()
+            
+            if sheet_name is None:
+                raise ValueError(f"Could not find worksheet matching pattern 'BB## - CURRENT PRICE & VOLUME' in file. Available sheets: {wb.sheetnames}")
+            
             # Read the specific sheet containing weights data
-            df = pd.read_excel(file_path, sheet_name="BB24 - CURRENT PRICE & VOLUME", engine='openpyxl')
+            df = pd.read_excel(file_path, sheet_name=sheet_name, engine='openpyxl')
             
             # Find the header row containing 'Level', 'Section', 'weight', 'Description', 'Category'
             level_col = None
@@ -2423,7 +2446,7 @@ class UKGDPSectorWeightsCollector(BaseCollector):
                                 'category': category,
                                 'weight': weight_float,
                                 'data_source': 'ONS_GDP_Source_Catalogue',
-                                'file_version': 'BB24'  # Blue Book 2024
+                                'file_version': bb_year  # Dynamic Blue Book year
                             })
                             
                             self.logger.debug(f"Section {section_str}: {weight_float} - {description}")
