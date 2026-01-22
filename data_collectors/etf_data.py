@@ -119,19 +119,19 @@ class VanguardETFCollector(BaseCollector):
                         self.logger.info(f"Set LD_LIBRARY_PATH for K8s: {new_ld_path}")
                     
                     return Service(path)
-            
-            # Check standard K8s locations
-            standard_paths = [
-                '/usr/bin/chromedriver',
-                '/usr/local/bin/chromedriver',
-                '/opt/chromedriver/chromedriver'
-            ]
-            
-            for path in standard_paths:
-                if os.path.exists(path):
-                    self.logger.info(f"Using standard K8s ChromeDriver: {path}")
-                    return Service(path)
-        
+
+        # Check standard system locations (works for all architectures: ARM64, AMD64, etc.)
+        standard_paths = [
+            '/usr/bin/chromedriver',
+            '/usr/local/bin/chromedriver',
+            '/opt/chromedriver/chromedriver'
+        ]
+
+        for path in standard_paths:
+            if os.path.exists(path):
+                self.logger.info(f"Using system ChromeDriver: {path}")
+                return Service(path)
+
         # Development environment fallback - use webdriver-manager
         try:
             from webdriver_manager.chrome import ChromeDriverManager
