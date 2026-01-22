@@ -193,17 +193,14 @@ class VanguardETFCollector(BaseCollector):
             import shutil
             import tempfile
             
-            if platform.machine().lower() in ['aarch64', 'arm64']:
-                # Copy ChromeDriver to writable temp location for undetected-chromedriver to patch
-                temp_dir = tempfile.mkdtemp()
-                temp_chromedriver = os.path.join(temp_dir, 'chromedriver')
-                shutil.copy2('/usr/bin/chromedriver', temp_chromedriver)
-                os.chmod(temp_chromedriver, 0o755)
-                self.logger.info(f"ARM64 detected - copied ChromeDriver to writable location: {temp_chromedriver}")
-                driver = uc.Chrome(options=chrome_options, driver_executable_path=temp_chromedriver, version_main=None)
-            else:
-                # Let undetected-chromedriver handle binary management for x86
-                driver = uc.Chrome(options=chrome_options, version_main=None)
+            # Copy system ChromeDriver to writable temp location for undetected-chromedriver to patch
+            # This works for all architectures (ARM64, AMD64, etc.)
+            temp_dir = tempfile.mkdtemp()
+            temp_chromedriver = os.path.join(temp_dir, 'chromedriver')
+            shutil.copy2('/usr/bin/chromedriver', temp_chromedriver)
+            os.chmod(temp_chromedriver, 0o755)
+            self.logger.info(f"Copied system ChromeDriver to writable location: {temp_chromedriver}")
+            driver = uc.Chrome(options=chrome_options, driver_executable_path=temp_chromedriver, version_main=None)
             
             try:
                 self.logger.info(f"Loading Vanguard page for {etf_ticker}")
