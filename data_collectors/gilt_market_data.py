@@ -90,19 +90,19 @@ class GiltMarketCollector(BaseCollector):
                         self.chrome_options.binary_location = '/shared/usr/bin/chromium'
                         self.logger.info("Using Chromium binary from shared volume")
                     return Service(path)
-            
-            # Fallback to system paths
-            system_paths = [
-                '/usr/bin/chromedriver',  # Most likely system location
-                '/usr/lib/chromium-browser/chromedriver',
-                '/snap/chromium/current/usr/lib/chromium-browser/chromedriver'
-            ]
-            
-            for path in system_paths:
-                if os.path.exists(path):
-                    self.logger.info(f"Using Pi ChromeDriver from system: {path}")
-                    return Service(path)
-        
+
+        # Check system paths (works for all architectures: ARM64, AMD64, etc.)
+        system_paths = [
+            '/usr/bin/chromedriver',  # Most likely system location
+            '/usr/lib/chromium-browser/chromedriver',
+            '/snap/chromium/current/usr/lib/chromium-browser/chromedriver'
+        ]
+
+        for path in system_paths:
+            if os.path.exists(path):
+                self.logger.info(f"Using system ChromeDriver: {path}")
+                return Service(path)
+
         # Fallback to webdriver-manager for development environments
         if ChromeDriverManager is not None:
             try:
